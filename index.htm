@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evolutionary Walking Creatures</title>
+    <!-- Tailwind for modern, clean UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Matter.js for 2D Physics -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+        let db, auth, user;
+
+        if (firebaseConfigStr) {
+            try {
+                const firebaseConfig = JSON.parse(firebaseConfigStr);
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                const initAuth = async () => {
+                    const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                    if (token) {
+                        const cred = await signInWithCustomToken(auth, token);
+                        user = cred.user;
+                    } else {
+                        const cred = await signInAnonymously(auth);
+                        user = cred.user;
+                    }
+                    document.getElementById('ui-cloud-status').innerText = "☁️ Cloud Ready";
+                };
+                initAuth();
+            } catch (e) {
+                console.error("Firebase init error", e);
+            }
+        }
+
+        window.saveApexToCloud = async (bestFitness, brainWeights) => {
+            if (!user || !db) return window.alertModal("Cloud Error", "Cloud not connected or still initializing.");
+            try {
+                document.getElementById('ui-cloud-status').innerText = "☁️ Saving...";
+                const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'evolutionData', 'apexData');
+                await setDoc(docRef, {
+                    fitness: bestFitness,
+                    weights: brainWeights,
+                    timestamp: Date.now()
+                });
+                document.getElementById('ui-cloud-status').innerText = "☁️ Saved!";
+                setTimeout(() => { document.getElementById('ui-cloud-status').innerText = "☁️ Cloud Ready"; }, 3000);
+            } catch (e) {
+                console.error("Save error", e);
+                document.getElementById('ui-cloud-status').innerText = "☁️ Save Failed";
+            }
+        };
+
+        window.loadApexFromCloud = async () => {
+            if (!user || !db) return window.alertModal("Cloud Error", "Cloud not connected or still initializing.");
+            try {
+                document.getElementById('ui-cloud-status').innerText = "☁️ Loading...";
+                const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'evolutionData', 'apexData');
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    window.applyLoadedApex(data.fitness, data.weights);
+                    document.getElementById('ui-cloud-status').innerText = "☁️ Loaded!";
+                    setTimeout(() => { document.getElementById('ui-cloud-status').innerText = "☁️ Cloud Ready"; }, 3000);
+                } else {
+                    window.alertModal("No Save Found", "You haven't saved an apex brain yet.");
+                    document.getElementById('ui-cloud-status').innerText = "☁️ Cloud Ready";
+                }
+            } catch (e) {
+                console.error("Load error", e);
+                document.getElementById('ui-cloud-status').innerText = "☁️ Load Failed";
+            }
+        };
+    </script>
+
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #87CEEB; /* Sky blue */
+            font-family: 'Inter', sans-serif;
+            touch-action: none; /* Prevent scroll on mobile drag */
+        }
+        
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Glassmorphism control panel */
+        #ui-panel {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.1));
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.2);
+            color: #1f2937;
+        }
+
+        /* Custom range slider styling */
+        input[type=range] {
+            accent-color: #3b82f6;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Custom Modal -->
+    <div id="custom-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div class="bg-white p-6 rounded-2xl shadow-xl w-80 max-w-full text-center">
+            <h2 id="modal-title" class="text-xl font-bold text-gray-800 mb-2">Notice</h2>
+            <p id="modal-desc" class="text-gray-600 mb-5 text-sm">Message goes here.</p>
+            <button onclick="document.getElementById('custom-modal').classList.add('hidden')" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-xl transition-colors">Acknowledge</button>
+        </div>
+    </div>
+
+    <!-- Control Panel -->
+    <div id="ui-panel" class="absolute top-4 left-4 p-5 rounded-2xl w-80 z-10 flex flex-col gap-3 text-sm text-gray-800 transition-all">
+        <h1 class="text-xl font-extrabold text-gray-900 border-b pb-2 tracking-tight">AI Evolution</h1>
+        
+        <div class="flex justify-between items-center mt-1">
+            <span class="font-semibold text-gray-600">Generation</span>
+            <span id="ui-gen" class="text-blue-600 font-black text-lg">1</span>
+        </div>
+        
+        <div class="flex justify-between items-center">
+            <span class="font-semibold text-gray-600">Time Left</span>
+            <span id="ui-time" class="text-red-500 font-mono font-bold">15.0s</span>
+        </div>
+        
+        <div class="flex justify-between items-center">
+            <span class="font-semibold text-gray-600">Best Fitness</span>
+            <span id="ui-best" class="font-mono font-bold text-green-600">0.0</span>
+        </div>
+
+        <div class="mt-3 border-t pt-3">
+            <label class="block font-semibold mb-1 text-gray-700 flex justify-between">
+                Sim Speed: <span id="ui-speed-val" class="text-blue-600">1x</span>
+            </label>
+            <input type="range" id="ui-speed" min="1" max="10" value="1" class="w-full cursor-pointer">
+        </div>
+
+        <div class="mt-2">
+            <label class="block font-semibold mb-1 text-gray-700 flex justify-between">
+                Pop Size (Next Gen): <span id="ui-pop-val" class="text-blue-600">20</span>
+            </label>
+            <input type="range" id="ui-pop" min="10" max="150" step="10" value="20" class="w-full cursor-pointer">
+        </div>
+
+        <div class="mt-3 border-t pt-3">
+            <button id="ui-cam-mode" class="w-full bg-white/60 hover:bg-white/90 text-gray-800 border border-white font-semibold py-1.5 px-4 rounded-xl shadow-sm transition-all focus:ring-2 focus:ring-blue-300">
+                Camera: Auto Track
+            </button>
+        </div>
+
+        <div class="mt-3 border-t pt-3">
+            <label class="block font-semibold mb-1 text-gray-700 flex justify-between">
+                Environment Map
+            </label>
+            <select id="ui-map" class="w-full p-2 rounded-lg border border-gray-300 bg-white/80 focus:ring-2 focus:ring-blue-300 cursor-pointer font-medium text-sm">
+                <option value="flat">Flat Ground</option>
+                <option value="hills">Hills & Slopes</option>
+                <option value="boxes">Box Climb Training</option>
+            </select>
+        </div>
+
+        <div class="mt-3 flex gap-2 justify-between items-center text-xs bg-white/40 p-2 rounded-lg border border-white/60">
+            <span id="ui-cloud-status" class="font-semibold text-gray-600">☁️ Cloud Offline</span>
+            <div class="flex gap-1.5">
+                <button id="btn-load-apex" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold py-1.5 px-2.5 rounded-lg shadow-sm border border-indigo-200 transition-colors">Load</button>
+                <button id="btn-save-apex" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 px-2.5 rounded-lg shadow-sm transition-colors">Save Apex</button>
+            </div>
+        </div>
+
+        <button id="ui-restart" class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-lg transition-colors focus:ring-4 focus:ring-blue-300">
+            Restart Evolution
+        </button>
+        <p class="text-xs text-gray-500 mt-2 text-center">Watch as neural networks evolve walking gaits over generations.</p>
+    </div>
+
+    <!-- Main Rendering Canvas -->
+    <canvas id="worldCanvas"></canvas>
+
+    <script>
+        /**
+         * Simple Matrix-math based Feedforward Neural Network.
+         * Tanh activation function is used to produce forces ranging from -1 to 1.
+         */
+        class NeuralNetwork {
+            constructor(inNodes, hidNodes, outNodes, weights = null) {
+                this.i = inNodes;
+                this.h = hidNodes;
+                this.o = outNodes;
+                
+                if (weights) {
+                    this.weights = JSON.parse(JSON.stringify(weights)); // Deep copy
+                } else {
+                    this.weights = {
+                        ih: this.randomMat(this.h, this.i),
+                        hb: this.randomMat(this.h, 1),
+                        ho: this.randomMat(this.o, this.h),
+                        ob: this.randomMat(this.o, 1)
+                    };
+                }
+            }
+
+            randomMat(rows, cols) {
+                let m = [];
+                for (let r = 0; r < rows; r++) {
+                    m[r] = [];
+                    for (let c = 0; c < cols; c++) m[r][c] = Math.random() * 2 - 1;
+                }
+                return m;
+            }
+
+            predict(inputArr) {
+                // Convert 1D input array to 2D column matrix
+                let inputs = [];
+                for (let i = 0; i < this.i; i++) inputs.push([inputArr[i]]); 
+
+                // Hidden layer
+                let hidden = this.add(this.mult(this.weights.ih, inputs), this.weights.hb);
+                hidden = this.map(hidden, x => Math.tanh(x)); // Activation
+
+                // Output layer
+                let output = this.add(this.mult(this.weights.ho, hidden), this.weights.ob);
+                output = this.map(output, x => Math.tanh(x)); // Activation
+
+                // Flatten back to 1D array
+                let outArr = [];
+                for (let i = 0; i < this.o; i++) outArr.push(output[i][0]);
+                return outArr;
+            }
+
+            // Matrix Operations
+            mult(a, b) {
+                let res = [];
+                for (let i = 0; i < a.length; i++) {
+                    res[i] = [];
+                    for (let j = 0; j < b[0].length; j++) {
+                        let sum = 0;
+                        for (let k = 0; k < a[0].length; k++) {
+                            sum += a[i][k] * b[k][j];
+                        }
+                        res[i][j] = sum;
+                    }
+                }
+                return res;
+            }
+            add(a, b) {
+                let res = [];
+                for (let i = 0; i < a.length; i++) {
+                    res[i] = [];
+                    for (let j = 0; j < a[0].length; j++) res[i][j] = a[i][j] + b[i][j];
+                }
+                return res;
+            }
+            map(a, fn) {
+                let res = [];
+                for (let i = 0; i < a.length; i++) {
+                    res[i] = [];
+                    for (let j = 0; j < a[0].length; j++) res[i][j] = fn(a[i][j]);
+                }
+                return res;
+            }
+
+            mutate(rate = 0.1, amount = 0.5) {
+                const mutFn = (val) => Math.random() < rate ? val + (Math.random() * 2 - 1) * amount : val;
+                this.weights.ih = this.map(this.weights.ih, mutFn);
+                this.weights.hb = this.map(this.weights.hb, mutFn);
+                this.weights.ho = this.map(this.weights.ho, mutFn);
+                this.weights.ob = this.map(this.weights.ob, mutFn);
+            }
+
+            clone() {
+                return new NeuralNetwork(this.i, this.h, this.o, this.weights);
+            }
+        }
+
+        // -----------------------------------------------------------
+        // Matter.js Setup & Globals
+        // -----------------------------------------------------------
+        const { Engine, World, Bodies, Body, Constraint, Composite } = Matter;
+        let engine;
+        let world;
+        const canvas = document.getElementById('worldCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Camera Pan & Drag State
+        let cameraMode = 'auto'; // 'auto' or 'free'
+        let camPanX = 0;
+        let camPanY = 0;
+        let isDragging = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+
+        // Camera Pan Listeners
+        const updateCamBtn = () => {
+            document.getElementById('ui-cam-mode').innerText = cameraMode === 'auto' ? 'Camera: Auto Track' : 'Camera: Free (Drag)';
+        };
+
+        const startDrag = (e) => {
+            isDragging = true;
+            cameraMode = 'free';
+            updateCamBtn();
+            lastMouseX = e.touches ? e.touches[0].clientX : e.clientX;
+            lastMouseY = e.touches ? e.touches[0].clientY : e.clientY;
+        };
+        const doDrag = (e) => {
+            if (!isDragging) return;
+            let currentX = e.touches ? e.touches[0].clientX : e.clientX;
+            let currentY = e.touches ? e.touches[0].clientY : e.clientY;
+            camPanX += currentX - lastMouseX;
+            camPanY += currentY - lastMouseY;
+            lastMouseX = currentX;
+            lastMouseY = currentY;
+        };
+        const endDrag = () => { isDragging = false; };
+
+        canvas.addEventListener('mousedown', startDrag);
+        canvas.addEventListener('mousemove', doDrag);
+        window.addEventListener('mouseup', endDrag);
+        
+        canvas.addEventListener('touchstart', startDrag, {passive: false});
+        canvas.addEventListener('touchmove', (e) => { e.preventDefault(); doDrag(e); }, {passive: false});
+        window.addEventListener('touchend', endDrag);
+
+        // Resize Canvas
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // GA & Simulation Globals
+        let population = [];
+        let popSize = 20;
+        let nextPopSize = 20;
+        let generation = 1;
+        const GEN_TIME = 15; // 15 seconds per generation
+        let timeLeft = GEN_TIME;
+        let bestFitnessAllTime = 0;
+        let bestBrainWeights = null;
+        let simSpeed = 1;
+        let globalFrame = 0;
+        let lastRealTime = performance.now();
+        let ground;
+        
+        let currentMapType = 'flat';
+        let terrainBodies = [];
+
+        // Collision Setup
+        // Category 1 is ground, Category 2 is creatures. 
+        // Creatures mask with ground (meaning they only hit the ground, not each other).
+        const CAT_GROUND = 0x0001;
+        const CAT_CREATURE = 0x0002;
+
+        /**
+         * The Creature Class
+         * A 2D articulated physics doll with a torso and 4 limbs (each with thigh & calf).
+         */
+        class Creature {
+            constructor(x, y, brain = null) {
+                // NN: 10 inputs (1 sine wave, 1 torso angle, 8 joint angles), 16 hidden, 8 outputs (torques)
+                this.brain = brain || new NeuralNetwork(10, 16, 8);
+                this.bodies = [];
+                this.constraints = [];
+                this.fitness = 0;
+                
+                // Track multiplier stats over the creature's lifespan
+                this.accumulatedMultiplier = 0;
+                this.thinkTicks = 0;
+
+                const filter = { category: CAT_CREATURE, mask: CAT_GROUND };
+
+                // Build Torso (Heavier density for stability)
+                this.torso = Bodies.rectangle(x, y, 90, 25, { 
+                    collisionFilter: filter, 
+                    density: 0.005, 
+                    friction: 0.8 
+                });
+                this.bodies.push(this.torso);
+
+                // Helper to create a segmented limb
+                const createLimb = (offsetX) => {
+                    let thigh = Bodies.rectangle(x + offsetX, y + 25, 12, 35, { collisionFilter: filter, friction: 0.8 });
+                    let calf = Bodies.rectangle(x + offsetX, y + 60, 10, 35, { collisionFilter: filter, friction: 0.8 });
+                    this.bodies.push(thigh, calf);
+
+                    // Hip Joint
+                    let hip = Constraint.create({
+                        bodyA: this.torso, pointA: { x: offsetX, y: 12.5 },
+                        bodyB: thigh, pointB: { x: 0, y: -17.5 },
+                        stiffness: 1, length: 0
+                    });
+                    
+                    // Knee Joint
+                    let knee = Constraint.create({
+                        bodyA: thigh, pointA: { x: 0, y: 17.5 },
+                        bodyB: calf, pointB: { x: 0, y: -17.5 },
+                        stiffness: 1, length: 0
+                    });
+
+                    this.constraints.push(hip, knee);
+                    return { thigh, calf, hip, knee };
+                };
+
+                // Create 4 Limbs: Front Left/Right, Back Left/Right
+                this.fl = createLimb(30);
+                this.fr = createLimb(30);
+                this.bl = createLimb(-30);
+                this.br = createLimb(-30);
+
+                // Add everything to world
+                Composite.add(world, this.bodies);
+                Composite.add(world, this.constraints);
+            }
+
+            // Normalizes angle differences to [-PI, PI]
+            normAngle(a) {
+                while (a > Math.PI) a -= 2 * Math.PI;
+                while (a < -Math.PI) a += 2 * Math.PI;
+                return a;
+            }
+
+            // Proportional-Derivative (PD) Motor control to bend joints to target angles
+            applyMotor(bodyA, bodyB, targetRelAngle) {
+                let currentRelAngle = this.normAngle(bodyB.angle - bodyA.angle);
+                let error = targetRelAngle - currentRelAngle;
+                let relVel = bodyB.angularVelocity - bodyA.angularVelocity;
+
+                let Kp = 0.03; // Proportional
+                let Kd = 0.005; // Damping
+                let torque = error * Kp - relVel * Kd;
+
+                let maxT = 0.08;
+                torque = Math.max(-maxT, Math.min(maxT, torque));
+
+                bodyA.torque -= torque;
+                bodyB.torque += torque;
+            }
+
+            // Neural Network loop step
+            think(timeFrame) {
+                // Calculate relative joint angles
+                let j1 = this.normAngle(this.fl.thigh.angle - this.torso.angle);
+                let j2 = this.normAngle(this.fl.calf.angle - this.fl.thigh.angle);
+                let j3 = this.normAngle(this.fr.thigh.angle - this.torso.angle);
+                let j4 = this.normAngle(this.fr.calf.angle - this.fr.thigh.angle);
+                let j5 = this.normAngle(this.bl.thigh.angle - this.torso.angle);
+                let j6 = this.normAngle(this.bl.calf.angle - this.bl.thigh.angle);
+                let j7 = this.normAngle(this.br.thigh.angle - this.torso.angle);
+                let j8 = this.normAngle(this.br.calf.angle - this.br.thigh.angle);
+
+                // Prepare Inputs (scaled down roughly to -1..1 range)
+                let inputs = [
+                    Math.sin(timeFrame * 0.05), // Oscillator for rhythmic pace
+                    this.normAngle(this.torso.angle) / Math.PI,
+                    j1 / Math.PI, j2 / Math.PI, j3 / Math.PI, j4 / Math.PI,
+                    j5 / Math.PI, j6 / Math.PI, j7 / Math.PI, j8 / Math.PI
+                ];
+
+                let outputs = this.brain.predict(inputs);
+                let maxBend = Math.PI / 1.5; 
+
+                // Apply target angles generated by brain
+                this.applyMotor(this.torso, this.fl.thigh, outputs[0] * maxBend);
+                this.applyMotor(this.fl.thigh, this.fl.calf, outputs[1] * maxBend);
+                this.applyMotor(this.torso, this.fr.thigh, outputs[2] * maxBend);
+                this.applyMotor(this.fr.thigh, this.fr.calf, outputs[3] * maxBend);
+                this.applyMotor(this.torso, this.bl.thigh, outputs[4] * maxBend);
+                this.applyMotor(this.bl.thigh, this.bl.calf, outputs[5] * maxBend);
+                this.applyMotor(this.torso, this.br.thigh, outputs[6] * maxBend);
+                this.applyMotor(this.br.thigh, this.br.calf, outputs[7] * maxBend);
+
+                // --- Reward System Multiplier ---
+                let limbsTouching = 0;
+                const groundY = 750;
+                const tolerance = 10; // Give a slight tolerance for ground contact detection
+                
+                // Check if the bottom of each calf is touching or very near the ground
+                if (this.fl.calf.position.y + 17.5 >= groundY - tolerance) limbsTouching++;
+                if (this.fr.calf.position.y + 17.5 >= groundY - tolerance) limbsTouching++;
+                if (this.bl.calf.position.y + 17.5 >= groundY - tolerance) limbsTouching++;
+                if (this.br.calf.position.y + 17.5 >= groundY - tolerance) limbsTouching++;
+                
+                // Base 1.0x, add 0.5x for each limb touching
+                let currentMultiplier = 1.0 + (0.5 * limbsTouching);
+                
+                // Height bonus: encourage keeping the torso high off the ground.
+                // Ground is at 750. Higher height = bigger multiplier.
+                let heightAboveGround = Math.max(0, groundY - this.torso.position.y);
+                let heightBonus = heightAboveGround / 100; // e.g. 150px height = 1.5x multiplier
+                
+                currentMultiplier *= heightBonus;
+                
+                // Penalize dragging the torso heavily to ensure they learn to "stand" rather than crawl
+                if (this.torso.position.y + 12.5 >= groundY - tolerance) {
+                    currentMultiplier *= 0.01; // Severely penalize touching the ground with the body
+                }
+                
+                this.accumulatedMultiplier += currentMultiplier;
+                this.thinkTicks++;
+            }
+
+            destroy() {
+                Composite.remove(world, this.bodies);
+                Composite.remove(world, this.constraints);
+            }
+        }
+
+        // -----------------------------------------------------------
+        // Engine & Evolution Logic
+        // -----------------------------------------------------------
+        
+        window.alertModal = (title, desc) => {
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-desc').innerText = desc;
+            document.getElementById('custom-modal').classList.remove('hidden');
+        };
+
+        window.applyLoadedApex = (fitness, weights) => {
+            bestFitnessAllTime = fitness;
+            bestBrainWeights = weights;
+            
+            let loadedBrain = new NeuralNetwork(10, 16, 8, weights);
+            
+            // Replace top portion of population with mutations of loaded brain
+            for (let i = 0; i < popSize; i++) {
+                if (population[i]) {
+                    population[i].destroy();
+                }
+                let xOff = (Math.random() * 20) - 10;
+                let yOff = (Math.random() * 10) - 5;
+                
+                let brain;
+                if (i === 0) {
+                    brain = loadedBrain.clone(); // The true apex
+                } else if (i < popSize * 0.7) {
+                    brain = loadedBrain.clone();
+                    brain.mutate(0.1, 0.4); // Mutations to improve it
+                } else {
+                    brain = new NeuralNetwork(10, 16, 8); // Fresh blood for diversity
+                }
+                population[i] = new Creature(200 + xOff, 600 + yOff, brain);
+            }
+            
+            generation = 1;
+            timeLeft = GEN_TIME;
+            updateUIStats();
+        };
+
+        function initSimulation() {
+            if (engine) {
+                Engine.clear(engine);
+            }
+            engine = Engine.create();
+            world = engine.world;
+            engine.gravity.y = 1.2; // Slightly heavier gravity for realistic falling
+
+            terrainBodies = [];
+
+            // Ground Box
+            ground = Bodies.rectangle(0, 800, 200000, 100, {
+                isStatic: true,
+                collisionFilter: { category: CAT_GROUND, mask: CAT_CREATURE },
+                friction: 1.0,
+                label: 'main-ground',
+                renderType: 'grass'
+            });
+            terrainBodies.push(ground);
+
+            // Dynamic Terrain Generation
+            if (currentMapType === 'hills') {
+                for (let i = 500; i < 30000; i += 700) {
+                    let angle = (Math.random() * 0.4) - 0.2; // Random slopes
+                    let hill = Bodies.rectangle(i, 740 - (Math.random() * 40), 500, 40, {
+                        isStatic: true,
+                        angle: angle,
+                        collisionFilter: { category: CAT_GROUND, mask: CAT_CREATURE },
+                        friction: 1.0,
+                        renderType: 'dirt'
+                    });
+                    terrainBodies.push(hill);
+                }
+            } else if (currentMapType === 'boxes') {
+                for (let i = 500; i < 30000; i += 450) {
+                    let height = 30 + (i / 1000) * 8; // Boxes get taller the further they progress
+                    let box = Bodies.rectangle(i, 750 - (height / 2), 70, height, {
+                        isStatic: true,
+                        collisionFilter: { category: CAT_GROUND, mask: CAT_CREATURE },
+                        friction: 0.8,
+                        renderType: 'wood'
+                    });
+                    terrainBodies.push(box);
+                }
+            }
+
+            Composite.add(world, terrainBodies);
+        }
+
+        function initPopulation() {
+            population.forEach(c => c.destroy());
+            population = [];
+            for (let i = 0; i < popSize; i++) {
+                // Add slight spatial offsets to prevent precise overlap initially
+                let xOff = (Math.random() * 20) - 10;
+                let yOff = (Math.random() * 10) - 5;
+                population.push(new Creature(200 + xOff, 600 + yOff));
+            }
+        }
+
+        function nextGeneration() {
+            // Evaluate Fitness (Horizontal distance to the right)
+            population.forEach(c => {
+                let avgMultiplier = c.thinkTicks > 0 ? (c.accumulatedMultiplier / c.thinkTicks) : 1;
+                let rawDistance = Math.max(0, c.torso.position.x - 200);
+                
+                // Apply the standing multiplier to the final fitness score
+                c.fitness = rawDistance * avgMultiplier;
+            });
+
+            // Sort best to worst
+            population.sort((a, b) => b.fitness - a.fitness);
+
+            let bestFitGen = population[0].fitness;
+            if (bestFitGen > bestFitnessAllTime) {
+                bestFitnessAllTime = bestFitGen;
+                bestBrainWeights = JSON.parse(JSON.stringify(population[0].brain.weights));
+            }
+
+            let newBrains = [];
+            popSize = nextPopSize;
+
+            // Elitism: Pass best performing brains cleanly to next generation
+            let eliteCount = Math.max(2, Math.floor(popSize * 0.1));
+            for (let i = 0; i < eliteCount; i++) {
+                if (population[i]) newBrains.push(population[i].brain.clone());
+            }
+
+            // Breed & Mutate
+            for (let i = eliteCount; i < popSize; i++) {
+                // Pick a parent from top 50%
+                let poolSize = Math.max(1, Math.floor(population.length / 2));
+                let parent = population[Math.floor(Math.random() * poolSize)];
+                
+                let childBrain = parent.brain.clone();
+                childBrain.mutate(0.1, 0.4); // 10% chance per weight, +/- 0.4 change
+                newBrains.push(childBrain);
+            }
+
+            // Clear old bodies
+            population.forEach(c => c.destroy());
+            population = [];
+
+            // Spawn next gen
+            for (let i = 0; i < popSize; i++) {
+                let xOff = (Math.random() * 20) - 10;
+                let yOff = (Math.random() * 10) - 5;
+                population.push(new Creature(200 + xOff, 600 + yOff, newBrains[i]));
+            }
+
+            generation++;
+            timeLeft = GEN_TIME;
+            updateUIStats();
+        }
+
+        // -----------------------------------------------------------
+        // Rendering & Loop
+        // -----------------------------------------------------------
+
+        function drawPoly(ctx, body) {
+            ctx.beginPath();
+            ctx.moveTo(body.vertices[0].x, body.vertices[0].y);
+            for (let i = 1; i < body.vertices.length; i++) {
+                ctx.lineTo(body.vertices[i].x, body.vertices[i].y);
+            }
+            ctx.closePath();
+        }
+
+        function render() {
+            // Reset transforms & clear screen
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Find best creature to focus camera
+            let bestC = population[0];
+            let maxDist = -Infinity;
+            for (let c of population) {
+                if (c.torso.position.x > maxDist) {
+                    maxDist = c.torso.position.x;
+                    bestC = c;
+                }
+            }
+
+            // Camera Setup
+            ctx.save();
+            if (cameraMode === 'auto') {
+                camPanX = canvas.width / 4 - bestC.torso.position.x;
+                camPanY = canvas.height / 2 - 750 + 200; // Keep ground centered vertically
+            }
+            ctx.translate(camPanX, camPanY);
+
+            // Draw Terrain Maps
+            for (let body of terrainBodies) {
+                if (body.label === 'main-ground') {
+                    ctx.fillStyle = '#4ade80'; // Lush green
+                    ctx.fillRect(-100000, 750, 200000, 1000);
+                    ctx.fillStyle = '#22c55e'; // Darker checker 
+                    for(let i = -10000; i < 50000; i += 100) {
+                        ctx.fillRect(i, 750, 50, 1000);
+                    }
+                } else {
+                    ctx.fillStyle = body.renderType === 'wood' ? '#b45309' : (body.renderType === 'dirt' ? '#78350f' : '#4ade80');
+                    ctx.strokeStyle = '#1e293b';
+                    ctx.lineWidth = 1.5;
+                    drawPoly(ctx, body);
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+
+            // Draw Goal Markers (1 meter = 100 pixels)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.font = 'bold 24px Inter';
+            [50, 100, 150].forEach(meters => {
+                let px = 200 + (meters * 100);
+                // Flag pole
+                ctx.fillRect(px, 350, 6, 400);
+                // Text
+                ctx.fillText(meters + 'm Goal', px - 50, 330);
+            });
+
+            // Helper to draw creature
+            const drawCreature = (c, alpha, color, useStroke = true) => {
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = color;
+                ctx.strokeStyle = '#1e293b'; // Dark outline
+                ctx.lineWidth = 1.5;
+
+                // Draw standard bodies
+                c.bodies.forEach(b => {
+                    drawPoly(ctx, b);
+                    ctx.fill();
+                    if (useStroke) ctx.stroke();
+                });
+
+                // Draw a stylistic "head" based on torso position to show orientation
+                let headX = c.torso.position.x + Math.cos(c.torso.angle) * 50;
+                let headY = c.torso.position.y + Math.sin(c.torso.angle) * 50;
+                ctx.beginPath();
+                ctx.arc(headX, headY, 14, 0, Math.PI*2);
+                ctx.fill();
+                ctx.stroke();
+                
+                // Little eye to show forward direction (right side)
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(headX + 4, headY - 2, 4, 0, Math.PI*2);
+                ctx.fill();
+            };
+
+            // Draw ordinary creatures (Ghosted) - Optimized for high pop size
+            let renderedGhosts = 0;
+            for (let c of population) {
+                if (c === bestC) continue;
+                
+                // OPTIMIZATION: If simulating fast and high pop, skip rendering most ghosts
+                if (simSpeed > 2 && renderedGhosts > 15) continue; 
+                
+                // Draw without strokes to heavily save canvas paths performance
+                drawCreature(c, 0.15, '#f87171', false); 
+                renderedGhosts++;
+            }
+            // Draw current best (Opaque, Blue, with outlines)
+            drawCreature(bestC, 1.0, '#3b82f6', true); 
+
+            ctx.restore();
+        }
+
+        function mainLoop(time) {
+            let dt = (time - lastRealTime) / 1000; 
+            lastRealTime = time;
+
+            // Stop spiral of death if tab was inactive
+            if (dt > 0.1) dt = 0.1;
+
+            // Run Physics N times per frame based on Sim Speed
+            let fixedDt = 16.666; 
+            for (let s = 0; s < simSpeed; s++) {
+                globalFrame++;
+                population.forEach(c => c.think(globalFrame));
+                Engine.update(engine, fixedDt);
+                timeLeft -= (fixedDt / 1000);
+            }
+
+            if (timeLeft <= 0) {
+                nextGeneration();
+            }
+
+            render();
+            updateTimerUI();
+
+            requestAnimationFrame(mainLoop);
+        }
+
+        // -----------------------------------------------------------
+        // UI Handling
+        // -----------------------------------------------------------
+        
+        const uiGen = document.getElementById('ui-gen');
+        const uiTime = document.getElementById('ui-time');
+        const uiBest = document.getElementById('ui-best');
+        const uiSpeedVal = document.getElementById('ui-speed-val');
+        const uiPopVal = document.getElementById('ui-pop-val');
+
+        function updateUIStats() {
+            uiGen.innerText = generation;
+            // Convert pixels to meters (1m = 100px)
+            uiBest.innerText = (bestFitnessAllTime / 100).toFixed(1) + 'm';
+        }
+
+        function updateTimerUI() {
+            uiTime.innerText = Math.max(0, timeLeft).toFixed(1) + 's';
+        }
+
+        document.getElementById('ui-speed').addEventListener('input', e => {
+            simSpeed = parseInt(e.target.value);
+            uiSpeedVal.innerText = simSpeed + 'x';
+        });
+
+        document.getElementById('ui-pop').addEventListener('input', e => {
+            nextPopSize = parseInt(e.target.value);
+            uiPopVal.innerText = nextPopSize;
+        });
+
+        document.getElementById('ui-cam-mode').addEventListener('click', () => {
+            cameraMode = cameraMode === 'auto' ? 'free' : 'auto';
+            updateCamBtn();
+        });
+
+        document.getElementById('ui-map').addEventListener('change', (e) => {
+            currentMapType = e.target.value;
+            document.getElementById('ui-restart').click();
+        });
+
+        document.getElementById('btn-save-apex').addEventListener('click', () => {
+            if (!bestBrainWeights) {
+                window.alertModal("No Apex Yet", "Wait for at least one generation to complete to establish an apex brain worth saving.");
+                return;
+            }
+            if (window.saveApexToCloud) {
+                window.saveApexToCloud(bestFitnessAllTime, bestBrainWeights);
+            }
+        });
+
+        document.getElementById('btn-load-apex').addEventListener('click', () => {
+            if (window.loadApexFromCloud) {
+                window.loadApexFromCloud();
+            }
+        });
+
+        document.getElementById('ui-restart').addEventListener('click', () => {
+            generation = 1;
+            bestFitnessAllTime = 0;
+            bestBrainWeights = null;
+            timeLeft = GEN_TIME;
+            popSize = nextPopSize;
+            updateUIStats();
+            initSimulation();
+            
+            // New random brains
+            population = [];
+            for (let i = 0; i < popSize; i++) {
+                let xOff = (Math.random() * 20) - 10;
+                let yOff = (Math.random() * 10) - 5;
+                population.push(new Creature(200 + xOff, 600 + yOff));
+            }
+        });
+
+        // Initialize!
+        initSimulation();
+        initPopulation();
+        requestAnimationFrame(mainLoop);
+
+    </script>
+</body>
+</html>
