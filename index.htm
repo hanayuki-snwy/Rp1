@@ -9,7 +9,7 @@
         body { margin: 0; overflow: hidden; background: #0b0c10; color: white; font-family: 'Inter', sans-serif; touch-action: none; user-select: none; }
         canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
         .ui-layer { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; padding: 1rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; z-index: 10; }
-        .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; background: rgba(0,0,0,0.4); padding: 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
+        .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
         .btn { 
             background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.2); 
             padding: 8px 16px; border-radius: 6px; cursor: pointer; pointer-events: auto;
@@ -28,10 +28,16 @@
         .btn-mlrs { border-color: rgba(60, 150, 255, 0.4); color: #77baff; background: rgba(0, 100, 255, 0.05); }
         .btn-mlrs:hover { background: rgba(60, 150, 255, 0.2); border-color: #55aaff; color: #fff; box-shadow: 0 0 15px rgba(0, 100, 255, 0.4); }
 
-        .instructions { background: rgba(0, 0, 0, 0.7); padding: 12px 20px; border-radius: 8px; font-size: 0.8rem; color: #bbb; text-align: center; max-width: 800px; border: 1px solid rgba(255,255,255,0.05); }
+        .btn-jet { border-color: rgba(255, 200, 60, 0.4); color: #ffdd77; background: rgba(255, 200, 0, 0.05); }
+        .btn-jet:hover { background: rgba(255, 200, 60, 0.2); border-color: #ffcc55; color: #fff; box-shadow: 0 0 15px rgba(255, 200, 0, 0.4); }
+
+        .zoom-controls { display: flex; gap: 0.25rem; margin-left: 10px; border-left: 1px solid rgba(255,255,255,0.2); padding-left: 10px; }
+
+        .instructions { background: rgba(0, 0, 0, 0.7); padding: 12px 20px; border-radius: 8px; font-size: 0.8rem; color: #bbb; text-align: center; max-width: 900px; border: 1px solid rgba(255,255,255,0.05); line-height: 1.4; }
         .highlight { color: #ff5555; font-weight: bold; }
         .highlight-blue { color: #55aaff; font-weight: bold; }
         .highlight-green { color: #55ff77; font-weight: bold; }
+        .highlight-yellow { color: #ffcc55; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -44,12 +50,17 @@
             <button class="btn btn-cram" id="btn-cram">Spawn C-RAM</button>
             <button class="btn btn-radar" id="btn-radar">Spawn Radar</button>
             <button class="btn btn-mlrs" id="btn-mlrs">Spawn MLRS</button>
+            <button class="btn btn-jet" id="btn-jet">Spawn Jet</button>
+            <div class="zoom-controls">
+                <button class="btn" id="btn-zoom-in" title="Zoom In">+</button>
+                <button class="btn" id="btn-zoom-out" title="Zoom Out">-</button>
+            </div>
             <button class="btn" id="btn-clear" style="margin-left: 10px; border-color: #666;">Clear All</button>
         </div>
         <div class="instructions">
-            <b>Controls:</b> [Right-Click / Middle-Click / WASD] to Pan Camera. [Left-Click] to Drag Boxes or Toggle MLRS. <br/>
-            C-RAMs use a <span class="highlight">Neural Network</span> to learn trajectories. They predict target impacts and prioritize defending <span class="highlight-green">Radars</span>. <br/>
-            Click an <span class="highlight-blue">MLRS</span> to toggle Auto/Manual mode. In Manual, click anywhere to fire!
+            <b>Controls:</b> [Right-Click/Drag or WASD] Pan Camera. [Scroll] Zoom. [Left-Click] Drag Boxes or Toggle MLRS. <br/>
+            <span class="highlight">C-RAMs</span> use RL to learn target intercepts. <span class="highlight-blue">MLRS</span> auto-calculates ballistics to hit <span class="highlight-green">Radars</span>. <br/>
+            <span class="highlight-yellow">Jets</span> use a Global Neural Network to learn to dodge AA fire and deploy countermeasures!
         </div>
     </div>
 
@@ -100,14 +111,18 @@
             }
         }
 
+        // Global Brain for all Jets across generations
+        const globalJetNN = new MLP(6, 16, 4, 0.05); // Inputs: [rdx, rdy, bdx, bdy, bvx, bvy], Outputs: [pitch, bomb, missile, decoy]
+        let jetGenerations = 0;
+
         // --- GAME ENGINE & STATE ---
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         
         let width, height;
-        const worldFloorY = 1200; // Absolute world Y coordinate for the ground
+        const worldFloorY = 1200; 
         
-        let camera = { x: -window.innerWidth/2, y: worldFloorY - window.innerHeight + 100 };
+        let camera = { x: -window.innerWidth/2, y: worldFloorY - window.innerHeight + 100, zoom: 0.8 };
         let keys = {};
         
         function resize() {
@@ -121,19 +136,19 @@
         const DRAG = 0.992;
         
         let entities = {
-            targets: [], // Boxes, Missiles
+            targets: [], // Boxes, Missiles, Bombs, Decoys
             crams: [],
             radars: [],
             mlrs: [],
+            jets: [],
             bullets: [],
             particles: []
         };
 
         let pointer = { screenX: 0, screenY: 0, worldX: 0, worldY: 0, vx: 0, vy: 0, isDown: false, btn: -1, isPanning: false };
-        let lastPointer = { worldX: 0, worldY: 0 };
+        let lastPointer = { worldX: 0, worldY: 0, screenX: 0, screenY: 0 };
         let draggedObj = null;
 
-        // Prevent context menu
         window.addEventListener('contextmenu', e => e.preventDefault());
 
         // --- CLASSES ---
@@ -143,10 +158,10 @@
                 this.x = x; this.y = y;
                 this.vx = vx; this.vy = vy;
                 this.color = color;
-                this.type = type; // normal, smoke, fire
+                this.type = type; 
                 this.life = 1.0;
                 this.decay = (type === 'smoke') ? (Math.random() * 0.01 + 0.005) : (Math.random() * 0.03 + 0.01);
-                this.size = (type === 'smoke') ? (Math.random() * 5 + 5) : (Math.random() * 3 + 1);
+                this.size = (type === 'smoke') ? (Math.random() * 8 + 5) : (Math.random() * 3 + 1);
             }
             update() {
                 if (this.type === 'normal' || this.type === 'fire') {
@@ -154,7 +169,11 @@
                     this.vx *= 0.95; this.vy *= 0.95;
                 } else if (this.type === 'smoke') {
                     this.vx *= 0.98; this.vy *= 0.98;
-                    this.size += 0.2; // Smoke expands
+                    this.vy -= 0.5; // Smoke rises
+                    this.size += 0.2;
+                } else if (this.type === 'flare') {
+                    this.vy += GRAVITY * 0.2;
+                    this.vx *= 0.9; this.vy *= 0.9;
                 }
                 this.x += this.vx; this.y += this.vy;
                 this.life -= this.decay;
@@ -165,37 +184,45 @@
                 ctx.beginPath();
                 ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
                 ctx.fill();
+                if (this.type === 'flare' || this.type === 'fire') {
+                    ctx.shadowBlur = 10; ctx.shadowColor = this.color;
+                    ctx.fill(); ctx.shadowBlur = 0;
+                }
                 ctx.globalAlpha = 1.0;
             }
         }
 
         function createExplosion(x, y, scale = 1, color = '#ffaa00') {
-            // Flash
+            for(let p = 0; p < 25 * scale; p++) {
+                entities.particles.push(new Particle(x, y, (Math.random()-0.5)*18*scale, (Math.random()-0.5)*18*scale, color, 'fire'));
+                entities.particles.push(new Particle(x, y, (Math.random()-0.5)*25*scale, (Math.random()-0.5)*25*scale, '#ffffff', 'normal'));
+            }
             for(let p = 0; p < 20 * scale; p++) {
-                entities.particles.push(new Particle(x, y, (Math.random()-0.5)*15*scale, (Math.random()-0.5)*15*scale, color, 'fire'));
-                entities.particles.push(new Particle(x, y, (Math.random()-0.5)*20*scale, (Math.random()-0.5)*20*scale, '#ffffff', 'normal'));
+                entities.particles.push(new Particle(x, y, (Math.random()-0.5)*8*scale, (Math.random()-0.5)*8*scale, 'rgba(80,80,80,0.6)', 'smoke'));
             }
-            // Smoke
-            for(let p = 0; p < 15 * scale; p++) {
-                entities.particles.push(new Particle(x, y, (Math.random()-0.5)*5*scale, (Math.random()-0.5)*5*scale - 2, 'rgba(100,100,100,0.5)', 'smoke'));
-            }
-            // Screen shake effect
-            camera.x += (Math.random() - 0.5) * 20 * scale;
-            camera.y += (Math.random() - 0.5) * 20 * scale;
+            // Screen shake (applied directly to camera view)
+            camera.x += (Math.random() - 0.5) * 20 * scale / camera.zoom;
+            camera.y += (Math.random() - 0.5) * 20 * scale / camera.zoom;
         }
 
         class Target {
             constructor(type, x, y, vx=0, vy=0) {
-                this.type = type; // 'box', 'missile'
+                this.type = type; // 'box', 'missile', 'bomb', 'decoy'
                 this.x = x; this.y = y;
                 this.vx = vx; this.vy = vy;
-                this.r = type === 'box' ? 25 : 10;
+                this.r = type === 'box' ? 25 : (type === 'bomb' ? 12 : (type === 'decoy' ? 6 : 10));
                 this.restitution = 0.3;
-                this.color = type === 'box' ? '#e6a14c' : '#ff4444';
                 this.dead = false;
                 this.hits = 0;
                 this.claimedBy = null;
-                this.maxHits = type === 'box' ? 5 : 3;
+                this.sourceJet = null;
+                this.dropState = null;
+                this.dropAction = null;
+                
+                if (type === 'box') { this.color = '#e6a14c'; this.maxHits = 5; }
+                else if (type === 'missile') { this.color = '#ff4444'; this.maxHits = 2; }
+                else if (type === 'bomb') { this.color = '#555'; this.maxHits = 3; }
+                else if (type === 'decoy') { this.color = '#ffaa00'; this.maxHits = 1; }
             }
 
             update() {
@@ -206,39 +233,47 @@
                     return;
                 }
 
-                this.vy += GRAVITY;
-                let drag = this.type === 'missile' ? 0.998 : DRAG;
-                this.vx *= drag; this.vy *= drag;
+                if (this.type === 'decoy') {
+                    this.vy += GRAVITY * 0.3; // Flares fall slower
+                    this.vx *= 0.98; this.vy *= 0.98;
+                    if (Math.random() < 0.4) entities.particles.push(new Particle(this.x, this.y, (Math.random()-0.5), (Math.random()-0.5), '#ffaa00', 'flare'));
+                } else {
+                    this.vy += GRAVITY;
+                    let drag = (this.type === 'missile' || this.type === 'bomb') ? 0.998 : DRAG;
+                    this.vx *= drag; this.vy *= drag;
+                }
 
                 this.x += this.vx; this.y += this.vy;
 
-                if (this.type === 'missile') {
-                    // Missiles leave smoke
-                    if (Math.random() < 0.5) {
-                        entities.particles.push(new Particle(this.x, this.y, this.vx*-0.1, this.vy*-0.1, 'rgba(200,200,200,0.5)', 'smoke'));
-                    }
-                    // Point towards velocity
-                    this.angle = Math.atan2(this.vy, this.vx);
+                if (this.type === 'missile' && Math.random() < 0.5) {
+                    entities.particles.push(new Particle(this.x, this.y, this.vx*-0.1, this.vy*-0.1, 'rgba(200,200,200,0.5)', 'smoke'));
                 }
+                
+                if (this.vx !== 0 || this.vy !== 0) this.angle = Math.atan2(this.vy, this.vx);
 
                 // Floor collision
                 if (this.y + this.r > worldFloorY) {
                     this.y = worldFloorY - this.r;
-                    if (this.type === 'missile') {
+                    if (this.type === 'missile' || this.type === 'bomb') {
                         this.dead = true;
-                        createExplosion(this.x, this.y, 1.5, '#ff4444');
+                        createExplosion(this.x, this.y, this.type === 'bomb' ? 2 : 1.5, '#ff4444');
+                    } else if (this.type === 'decoy') {
+                        this.dead = true;
                     } else {
-                        this.vy *= -this.restitution;
-                        this.vx *= 0.95;
+                        this.vy *= -this.restitution; this.vx *= 0.95;
                     }
                 }
 
                 // Radar collision check
-                for (let r of entities.radars) {
-                    if (Math.hypot(this.x - r.x, this.y - r.y) < r.radius + this.r) {
-                        this.dead = true;
-                        r.dead = true;
-                        createExplosion(r.x, r.y, 3, '#55ff77'); // Massive radar explosion
+                if (this.type === 'missile' || this.type === 'bomb' || this.type === 'box') {
+                    for (let r of entities.radars) {
+                        if (Math.hypot(this.x - r.x, this.y - r.y) < r.radius + this.r) {
+                            this.dead = true; r.dead = true;
+                            createExplosion(r.x, r.y, 3, '#55ff77');
+                            if (this.sourceJet && !this.sourceJet.dead && this.dropState) {
+                                this.sourceJet.rewardSuccess(this.dropState, this.dropAction);
+                            }
+                        }
                     }
                 }
             }
@@ -249,23 +284,24 @@
                 
                 if (this.type === 'box') {
                     ctx.rotate(this.vx * 0.05);
-                    ctx.fillStyle = this.color;
-                    ctx.strokeStyle = '#fff';
-                    ctx.lineWidth = 2;
-                    ctx.beginPath(); ctx.rect(-this.r, -this.r, this.r * 2, this.r * 2);
-                    ctx.fill(); ctx.stroke();
+                    ctx.fillStyle = this.color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.rect(-this.r, -this.r, this.r * 2, this.r * 2); ctx.fill(); ctx.stroke();
                     ctx.beginPath(); ctx.moveTo(-this.r, -this.r); ctx.lineTo(this.r, this.r);
                     ctx.moveTo(this.r, -this.r); ctx.lineTo(-this.r, this.r);
                     ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.stroke();
                 } else if (this.type === 'missile') {
                     ctx.rotate(this.angle);
-                    ctx.fillStyle = '#eee';
-                    ctx.beginPath();
-                    ctx.moveTo(15, 0); ctx.lineTo(-10, 5); ctx.lineTo(-10, -5);
-                    ctx.fill();
-                    // Flame
-                    ctx.fillStyle = '#ffaa00';
-                    ctx.beginPath(); ctx.moveTo(-10, 3); ctx.lineTo(-20 - Math.random()*10, 0); ctx.lineTo(-10, -3); ctx.fill();
+                    ctx.fillStyle = '#eee'; ctx.beginPath();
+                    ctx.moveTo(15, 0); ctx.lineTo(-10, 5); ctx.lineTo(-10, -5); ctx.fill();
+                    ctx.fillStyle = '#ffaa00'; ctx.beginPath(); ctx.moveTo(-10, 3); ctx.lineTo(-20 - Math.random()*10, 0); ctx.lineTo(-10, -3); ctx.fill();
+                } else if (this.type === 'bomb') {
+                    ctx.rotate(this.angle);
+                    ctx.fillStyle = '#444'; ctx.beginPath();
+                    ctx.ellipse(0, 0, 15, 8, 0, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = '#222'; ctx.fillRect(-15, -10, 5, 20); // Tail fins
+                } else if (this.type === 'decoy') {
+                    ctx.fillStyle = '#fff'; ctx.shadowBlur = 15; ctx.shadowColor = '#ffaa00';
+                    ctx.beginPath(); ctx.arc(0, 0, this.r, 0, Math.PI*2); ctx.fill();
                 }
                 ctx.restore();
             }
@@ -273,137 +309,273 @@
 
         class Radar {
             constructor(x, y) {
-                this.x = x; this.y = y;
-                this.radius = 40;
-                this.angle = 0;
-                this.dead = false;
+                this.x = x; this.y = y; this.radius = 40; this.angle = 0; this.dead = false;
             }
             update() {
                 this.angle += 0.03;
-                if (this.y < worldFloorY) {
-                    this.y += GRAVITY * 10; // Drop to floor
-                    if(this.y > worldFloorY) this.y = worldFloorY;
+                if (this.y < worldFloorY) { this.y += GRAVITY * 10; if(this.y > worldFloorY) this.y = worldFloorY; }
+            }
+            draw(ctx) {
+                ctx.save(); ctx.translate(this.x, this.y);
+                ctx.fillStyle = '#223'; ctx.beginPath(); ctx.moveTo(-30, 0); ctx.lineTo(-20, -40); ctx.lineTo(20, -40); ctx.lineTo(30, 0); ctx.fill();
+                ctx.translate(0, -40); ctx.rotate(this.angle);
+                ctx.fillStyle = 'rgba(60, 255, 120, 0.2)'; ctx.strokeStyle = '#55ff77'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(0, 0, this.radius, Math.PI, Math.PI*2); ctx.fill(); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0, -this.radius); ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        class Jet {
+            constructor(x, y, dir) {
+                this.x = x; this.y = y; 
+                this.dir = dir; // 1 for right, -1 for left
+                this.angle = dir === 1 ? 0 : Math.PI;
+                this.speed = 14;
+                this.vx = Math.cos(this.angle) * this.speed;
+                this.vy = Math.sin(this.angle) * this.speed;
+                this.dead = false;
+                this.bombCooldown = 0;
+                this.missileCooldown = 0;
+                this.decoyCooldown = 0;
+                this.memory = []; // Store states for RL
+                jetGenerations++;
+            }
+
+            update() {
+                // Return to baseline altitude if safe
+                let targetAltitude = worldFloorY - 800;
+                let altDiff = (targetAltitude - this.y) * 0.001;
+
+                if (this.bombCooldown > 0) this.bombCooldown--;
+                if (this.missileCooldown > 0) this.missileCooldown--;
+                if (this.decoyCooldown > 0) this.decoyCooldown--;
+
+                // Find closest radar
+                let bestRadar = null; let minRDist = Infinity;
+                for (let r of entities.radars) {
+                    let d = Math.hypot(this.x - r.x, this.y - r.y);
+                    if (d < minRDist) { minRDist = d; bestRadar = r; }
+                }
+
+                // Find closest bullet
+                let closestB = null; let minBDist = Infinity;
+                for (let b of entities.bullets) {
+                    let d = Math.hypot(this.x - b.x, this.y - b.y);
+                    if (d < minBDist && d < 800) { minBDist = d; closestB = b; }
+                }
+
+                let rdx = bestRadar ? (bestRadar.x - this.x) / 1500 : 0;
+                let rdy = bestRadar ? (bestRadar.y - this.y) / 1500 : 0;
+                let bdx = closestB ? (closestB.x - this.x) / 1000 : 0;
+                let bdy = closestB ? (closestB.y - this.y) / 1000 : 0;
+                let bvx = closestB ? closestB.vx / 40 : 0;
+                let bvy = closestB ? closestB.vy / 40 : 0;
+
+                let state = [rdx, rdy, bdx, bdy, bvx, bvy];
+                
+                // Add exploration noise to action to discover toss/dive bombing
+                let action = globalJetNN.forward(state).map(v => v + (Math.random()-0.5)*0.15);
+                
+                let pitch = action[0]; 
+                let tryBomb = action[1]; 
+                let tryMissile = action[2]; 
+                let tryDecoy = action[3];
+
+                // Apply pitch
+                if (this.dir === 1) {
+                    this.angle += pitch * 0.05 + altDiff;
+                    this.angle = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, this.angle));
+                } else {
+                    this.angle -= pitch * 0.05 + altDiff;
+                    // Ensure angle wraps correctly around PI for clamping
+                    while(this.angle < 0) this.angle += Math.PI*2;
+                    while(this.angle > Math.PI*2) this.angle -= Math.PI*2;
+                    if (this.angle < Math.PI - Math.PI/2.5) this.angle = Math.PI - Math.PI/2.5;
+                    if (this.angle > Math.PI + Math.PI/2.5) this.angle = Math.PI + Math.PI/2.5;
+                }
+
+                this.vx = Math.cos(this.angle) * this.speed;
+                this.vy = Math.sin(this.angle) * this.speed;
+
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Jet Exhaust
+                entities.particles.push(new Particle(this.x - Math.cos(this.angle)*30, this.y - Math.sin(this.angle)*30, -this.vx*0.5 + (Math.random()-0.5)*2, -this.vy*0.5 + (Math.random()-0.5)*2, '#ffaa00', 'fire'));
+
+                // Bombing (Dive/Toss dependent on current angle when dropped)
+                if (tryBomb > 0.2 && this.bombCooldown <= 0 && bestRadar && minRDist < 1200) {
+                    let b = new Target('bomb', this.x, this.y + 10, this.vx, this.vy + 2);
+                    b.sourceJet = this; b.dropState = state; b.dropAction = action;
+                    entities.targets.push(b);
+                    this.bombCooldown = 150;
+                }
+
+                // Twin Missiles
+                if (tryMissile > 0.3 && this.missileCooldown <= 0 && bestRadar && minRDist < 2000) {
+                    let mSpeed = 25;
+                    let targetAngle = Math.atan2(bestRadar.y - this.y, bestRadar.x - this.x);
+                    let m1 = new Target('missile', this.x, this.y - 10, Math.cos(targetAngle - 0.1)*mSpeed, Math.sin(targetAngle - 0.1)*mSpeed);
+                    let m2 = new Target('missile', this.x, this.y + 10, Math.cos(targetAngle + 0.1)*mSpeed, Math.sin(targetAngle + 0.1)*mSpeed);
+                    m1.sourceJet = this; m1.dropState = state; m1.dropAction = action;
+                    m2.sourceJet = this; m2.dropState = state; m2.dropAction = action;
+                    entities.targets.push(m1, m2);
+                    this.missileCooldown = 250;
+                }
+
+                // Deploy Decoy
+                if (tryDecoy > 0.1 && this.decoyCooldown <= 0 && closestB) {
+                    entities.targets.push(new Target('decoy', this.x, this.y, this.vx * 0.5, this.vy - 5));
+                    this.decoyCooldown = 40;
+                }
+
+                this.memory.push({state, action, time: Date.now()});
+                if (this.memory.length > 40) this.memory.shift();
+
+                if (this.x > camera.x + width/camera.zoom + 2000 || this.x < camera.x - 2000) this.dead = true;
+            }
+
+            rewardSuccess(state, action) {
+                // Reward: reinforce the exact actions that lead to a successful radar kill
+                globalJetNN.inp = state;
+                globalJetNN.forward(state);
+                // Strongly encourage the bomb/missile drop and maintain the successful pitch
+                globalJetNN.train([action[0], 1.0, 1.0, action[3]]);
+            }
+
+            onHit() {
+                this.dead = true;
+                createExplosion(this.x, this.y, 3, '#ffaa00');
+                
+                // Reinforcement Learning: Penalize last actions leading to death
+                if (this.memory.length > 0) {
+                    for (let i = Math.max(0, this.memory.length - 15); i < this.memory.length; i++) {
+                        let m = this.memory[i];
+                        // Target output: Opposite pitch, Force Decoy
+                        let targetPitch = -m.action[0]; 
+                        let targetDecoy = 1.0; 
+                        globalJetNN.inp = m.state;
+                        globalJetNN.forward(m.state);
+                        globalJetNN.train([targetPitch, m.action[1], m.action[2], targetDecoy]);
+                    }
                 }
             }
+
             draw(ctx) {
                 ctx.save();
                 ctx.translate(this.x, this.y);
                 
-                // Base
-                ctx.fillStyle = '#223';
-                ctx.beginPath(); ctx.moveTo(-30, 0); ctx.lineTo(-20, -40); ctx.lineTo(20, -40); ctx.lineTo(30, 0); ctx.fill();
+                // Rotate based on true flight angle
+                if (this.dir === -1) {
+                    ctx.rotate(this.angle - Math.PI); // Adjust local rotation for left-facing orientation
+                    ctx.scale(-1, 1); 
+                } else {
+                    ctx.rotate(this.angle);
+                }
                 
-                // Dish
-                ctx.translate(0, -40);
-                ctx.rotate(this.angle);
-                ctx.fillStyle = 'rgba(60, 255, 120, 0.2)';
-                ctx.strokeStyle = '#55ff77';
-                ctx.lineWidth = 2;
-                
-                ctx.beginPath(); ctx.arc(0, 0, this.radius, Math.PI, Math.PI*2); ctx.fill(); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0, -this.radius); ctx.stroke();
-                
+                // Draw Jet Body
+                ctx.fillStyle = '#667'; ctx.beginPath();
+                ctx.moveTo(40, 0); ctx.lineTo(10, 10); ctx.lineTo(-30, 10); ctx.lineTo(-40, 0); ctx.lineTo(-30, -10); ctx.lineTo(10, -10); ctx.fill();
+                // Wings
+                ctx.fillStyle = '#556'; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-20, 25); ctx.lineTo(-30, 25); ctx.lineTo(-15, 0); ctx.fill();
+                ctx.fillStyle = '#445'; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-20, -25); ctx.lineTo(-30, -25); ctx.lineTo(-15, 0); ctx.fill();
+                // Cockpit
+                ctx.fillStyle = '#8ce'; ctx.beginPath(); ctx.ellipse(15, -3, 8, 3, 0, 0, Math.PI*2); ctx.fill();
+
                 ctx.restore();
             }
         }
 
         class MLRS {
             constructor(x, y) {
-                this.x = x; this.y = y;
-                this.manual = false;
-                this.cooldown = 0;
-                this.angle = -Math.PI / 3;
+                this.x = x; this.y = y; this.manual = false; this.cooldown = 0; this.angle = -Math.PI / 3;
             }
             update() {
-                if (this.y < worldFloorY) {
-                    this.y += GRAVITY * 10;
-                    if(this.y > worldFloorY) this.y = worldFloorY;
-                }
+                if (this.y < worldFloorY) { this.y += GRAVITY * 10; if(this.y > worldFloorY) this.y = worldFloorY; }
                 if (this.cooldown > 0) this.cooldown--;
 
                 if (!this.manual) {
-                    // Auto Mode
-                    this.angle += Math.sin(Date.now() * 0.001) * 0.01; // Sweep
-                    if (this.cooldown <= 0 && Math.random() < 0.005) {
-                        this.fire(this.angle);
-                        this.cooldown = 150;
+                    // Autonomous Ballistic Targeting
+                    let bestRadar = null; let minDist = Infinity;
+                    for (let r of entities.radars) {
+                        let d = Math.abs(r.x - this.x);
+                        if (d < minDist) { minDist = d; bestRadar = r; }
+                    }
+
+                    if (bestRadar) {
+                        // Ballistics formula to hit (tx, ty) with v
+                        let tx = bestRadar.x - this.x;
+                        let ty = (bestRadar.y - 30) - (this.y - 30);
+                        let v = 28; let g = GRAVITY;
+                        let root = v*v*v*v - g*(g*tx*tx + 2*ty*v*v);
+                        
+                        if (root >= 0) {
+                            // High or low arc (using low arc)
+                            let targetAngle = Math.atan2(v*v - Math.sqrt(root), g * tx);
+                            if (tx < 0) targetAngle = Math.atan2(v*v - Math.sqrt(root), g * tx) - Math.PI; // Adjust for left side
+                            
+                            // Smooth aim
+                            let diff = targetAngle - this.angle;
+                            while(diff > Math.PI) diff -= Math.PI*2; while(diff < -Math.PI) diff += Math.PI*2;
+                            this.angle += diff * 0.05;
+
+                            if (this.cooldown <= 0 && Math.abs(diff) < 0.1) {
+                                this.fire(this.angle); this.cooldown = 120;
+                            }
+                        } else {
+                            this.angle += Math.sin(Date.now() * 0.001) * 0.01; // Sweep if no target in range
+                        }
+                    } else {
+                        this.angle += Math.sin(Date.now() * 0.001) * 0.01;
                     }
                 } else {
-                    // Manual Mode Aiming
                     let targetAngle = Math.atan2(pointer.worldY - (this.y - 30), pointer.worldX - this.x);
-                    // Restrict angle so it doesn't shoot into ground
                     if (targetAngle > 0) targetAngle = targetAngle > Math.PI/2 ? Math.PI : 0;
                     this.angle = targetAngle;
                 }
             }
             fire(angle) {
                 let speed = 28;
-                let vx = Math.cos(angle) * speed;
-                let vy = Math.sin(angle) * speed;
+                let vx = Math.cos(angle) * speed; let vy = Math.sin(angle) * speed;
                 let m = new Target('missile', this.x + Math.cos(angle)*30, this.y - 30 + Math.sin(angle)*30, vx, vy);
                 entities.targets.push(m);
                 createExplosion(this.x + Math.cos(angle)*30, this.y - 30 + Math.sin(angle)*30, 0.5, '#fff');
             }
             draw(ctx) {
-                ctx.save();
-                ctx.translate(this.x, this.y);
-                
-                // Chassis
+                ctx.save(); ctx.translate(this.x, this.y);
                 ctx.fillStyle = '#343'; ctx.fillRect(-40, -20, 80, 20);
                 ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(-25, 0, 10, 0, Math.PI*2); ctx.arc(25, 0, 10, 0, Math.PI*2); ctx.fill();
                 
-                // Launcher
-                ctx.translate(0, -20);
-                ctx.rotate(this.angle);
-                ctx.fillStyle = '#454';
-                ctx.fillRect(0, -10, 40, 20);
-                
+                ctx.translate(0, -20); ctx.rotate(this.angle);
+                ctx.fillStyle = '#454'; ctx.fillRect(0, -10, 40, 20);
                 ctx.restore();
 
-                // Draw Mode UI
-                ctx.save();
-                ctx.translate(this.x, this.y - 50);
-                ctx.textAlign = 'center'; ctx.font = '12px Inter';
-                ctx.fillStyle = this.manual ? '#55aaff' : '#aaa';
-                ctx.fillText(this.manual ? "MANUAL" : "AUTO", 0, 0);
+                ctx.save(); ctx.translate(this.x, this.y - 50); ctx.textAlign = 'center'; ctx.font = '12px Inter';
+                ctx.fillStyle = this.manual ? '#55aaff' : '#aaa'; ctx.fillText(this.manual ? "MANUAL" : "AUTO", 0, 0);
                 ctx.restore();
 
-                // Draw Trajectory Projection in Manual mode
                 if (this.manual) {
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.setLineDash([10, 10]);
-                    ctx.strokeStyle = 'rgba(85, 170, 255, 0.6)';
-                    ctx.lineWidth = 2;
+                    ctx.save(); ctx.beginPath(); ctx.setLineDash([10, 10]); ctx.strokeStyle = 'rgba(85, 170, 255, 0.6)'; ctx.lineWidth = 2;
                     let simX = this.x; let simY = this.y - 30;
-                    let simVx = Math.cos(this.angle) * 28;
-                    let simVy = Math.sin(this.angle) * 28;
+                    let simVx = Math.cos(this.angle) * 28; let simVy = Math.sin(this.angle) * 28;
                     ctx.moveTo(simX, simY);
                     for(let i=0; i<80; i++) {
-                        simVy += GRAVITY;
-                        simVx *= 0.998; simVy *= 0.998;
-                        simX += simVx; simY += simVy;
-                        ctx.lineTo(simX, simY);
+                        simVy += GRAVITY; simVx *= 0.998; simVy *= 0.998;
+                        simX += simVx; simY += simVy; ctx.lineTo(simX, simY);
                         if (simY > worldFloorY) break;
                     }
-                    ctx.stroke();
-                    ctx.restore();
+                    ctx.stroke(); ctx.restore();
                 }
             }
         }
 
         class CRAM {
             constructor(x, y) {
-                this.x = x; this.y = y;
-                this.vy = 0;
+                this.x = x; this.y = y; this.vy = 0;
                 this.nn = new MLP(4, 8, 1);
-                this.cooldown = 0;
-                this.target = null;
-                this.aimAngle = -Math.PI / 2;
-                
-                this.shotsFired = 0;
-                this.shotsHit = 0;
-                this.trainCount = 0;
+                this.cooldown = 0; this.target = null; this.aimAngle = -Math.PI / 2;
+                this.shotsFired = 0; this.shotsHit = 0; this.trainCount = 0;
             }
 
             update() {
@@ -416,48 +588,40 @@
                 // PRIORITY TARGETING ALGORITHM
                 let bestTarget = null;
                 let highestScore = -Infinity;
+                let allThreats = [...entities.targets, ...entities.jets];
 
-                for (let t of entities.targets) {
-                    if (t.y > worldFloorY - t.r - 10) continue; // Ignore grounded
-                    if (draggedObj === t) continue;
-                    if (t.claimedBy && t.claimedBy !== this) continue; // Exclusive targeting
+                for (let t of allThreats) {
+                    let isJet = (t instanceof Jet);
+                    if (!isJet && t.y > worldFloorY - t.r - 10) continue; 
+                    if (!isJet && draggedObj === t) continue;
+                    if (t.claimedBy && t.claimedBy !== this) continue;
 
                     let distToCram = Math.hypot(t.x - this.x, t.y - this.y);
-                    if (distToCram > 1800) continue; // Max Range
+                    if (distToCram > 2200) continue;
 
-                    // Predict Target Impact X (Kinematic projection)
-                    let a = 0.5 * GRAVITY;
-                    let b = t.vy;
-                    let c = -(worldFloorY - t.y);
-                    let disc = b*b - 4*a*c;
-                    let impactX = t.x;
-                    
-                    if(disc >= 0) {
-                        let t1 = (-b + Math.sqrt(disc)) / (2*a);
-                        let t2 = (-b - Math.sqrt(disc)) / (2*a);
-                        let timeToImpact = Math.max(t1, t2);
-                        impactX = t.x + t.vx * timeToImpact;
-                    }
+                    let score = -distToCram; 
 
-                    let score = -distToCram; // Base score prefers closer targets
-                    
-                    // Defend Radars Priority
-                    for (let r of entities.radars) {
-                        if (Math.abs(impactX - r.x) < r.radius + 150) {
-                            score += 10000; // MASSIVE PRIORITY
-                            break;
+                    if (isJet) score += 5000;
+                    if (!isJet && t.type === 'decoy') score += 15000; // MASSIVE priority to decoys
+                    if (!isJet && t.type === 'bomb') score += 8000;
+
+                    // Radar Threat Prediction
+                    if (!isJet && (t.type === 'missile' || t.type === 'bomb' || t.type === 'box')) {
+                        let a = 0.5 * GRAVITY; let b = t.vy; let c = -(worldFloorY - t.y);
+                        let disc = b*b - 4*a*c;
+                        if(disc >= 0) {
+                            let timeToImpact = Math.max((-b + Math.sqrt(disc)) / (2*a), (-b - Math.sqrt(disc)) / (2*a));
+                            let impactX = t.x + t.vx * timeToImpact;
+                            for (let r of entities.radars) {
+                                if (Math.abs(impactX - r.x) < r.radius + 150) { score += 10000; break; }
+                            }
                         }
                     }
 
-                    if (score > highestScore) {
-                        highestScore = score;
-                        bestTarget = t;
-                    }
+                    if (score > highestScore) { highestScore = score; bestTarget = t; }
                 }
 
-                if (this.target && this.target !== bestTarget && this.target.claimedBy === this) {
-                    this.target.claimedBy = null; // Release old target
-                }
+                if (this.target && this.target !== bestTarget && this.target.claimedBy === this) this.target.claimedBy = null;
                 this.target = bestTarget;
                 if (this.target) this.target.claimedBy = this;
 
@@ -465,9 +629,7 @@
                     let dx = this.target.x - this.x;
                     let dy = this.target.y - this.y;
                     
-                    // Normalize for NN
                     let inputs = [ dx / 1500, dy / 1500, this.target.vx / 30, this.target.vy / 30 ];
-                    
                     let nnOutput = this.nn.forward(inputs);
                     let offsetAngle = Math.max(-1.5, Math.min(1.5, nnOutput[0]));
 
@@ -490,15 +652,10 @@
             }
 
             fire(inputs, predictedOffset, baseAngle) {
-                this.cooldown = 3;
-                this.shotsFired++;
-                
-                let bSpeed = 35;
-                let bx = Math.cos(this.aimAngle) * bSpeed;
-                let by = Math.sin(this.aimAngle) * bSpeed;
-
-                let tipX = this.x + Math.cos(this.aimAngle) * 30;
-                let tipY = this.y - 15 + Math.sin(this.aimAngle) * 30;
+                this.cooldown = 3; this.shotsFired++;
+                let bSpeed = 40;
+                let bx = Math.cos(this.aimAngle) * bSpeed; let by = Math.sin(this.aimAngle) * bSpeed;
+                let tipX = this.x + Math.cos(this.aimAngle) * 30; let tipY = this.y - 15 + Math.sin(this.aimAngle) * 30;
 
                 entities.bullets.push({
                     x: tipX, y: tipY, vx: bx, vy: by,
@@ -511,33 +668,21 @@
             }
 
             draw(ctx) {
-                ctx.save();
-                ctx.translate(this.x, this.y);
-                
+                ctx.save(); ctx.translate(this.x, this.y);
                 ctx.fillStyle = '#222'; ctx.strokeStyle = '#444'; ctx.lineWidth = 2;
                 ctx.beginPath(); ctx.moveTo(-30, 0); ctx.lineTo(-20, -15); ctx.lineTo(20, -15); ctx.lineTo(30, 0); ctx.closePath();
                 ctx.fill(); ctx.stroke();
                 
-                ctx.translate(0, -15);
-                ctx.rotate(this.aimAngle);
-                
+                ctx.translate(0, -15); ctx.rotate(this.aimAngle);
                 ctx.fillStyle = '#111'; ctx.fillRect(10, -4, 35, 8);
                 ctx.fillStyle = '#ddd'; ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-
                 ctx.restore();
 
-                ctx.save();
-                ctx.translate(this.x, this.y - 45);
-                ctx.textAlign = 'center'; ctx.font = '10px Inter';
-                
+                ctx.save(); ctx.translate(this.x, this.y - 45); ctx.textAlign = 'center'; ctx.font = '10px Inter';
                 let acc = this.shotsFired > 0 ? ((this.shotsHit / this.shotsFired) * 100).toFixed(1) : "0.0";
                 ctx.fillStyle = '#00ffaa'; ctx.fillText(`HIT: ${acc}%`, 0, 0);
                 ctx.fillStyle = '#ffaa00'; ctx.fillText(`GEN: ${this.trainCount}`, 0, 12);
-                
-                // Show if locked
-                if(this.target) {
-                    ctx.fillStyle = '#ff5555'; ctx.fillText(`[LOCKED]`, 0, -12);
-                }
+                if(this.target) { ctx.fillStyle = '#ff5555'; ctx.fillText(`[LOCKED]`, 0, -12); }
                 ctx.restore();
             }
         }
@@ -545,42 +690,38 @@
         // --- MAIN LOOP ---
 
         function update() {
-            // Camera Panning Keys
-            let panSpeed = 15;
+            let panSpeed = 15 / camera.zoom;
             if (keys['w'] || keys['ArrowUp']) camera.y -= panSpeed;
             if (keys['s'] || keys['ArrowDown']) camera.y += panSpeed;
             if (keys['a'] || keys['ArrowLeft']) camera.x -= panSpeed;
             if (keys['d'] || keys['ArrowRight']) camera.x += panSpeed;
 
-            // Camera Panning Mouse
             if (pointer.isPanning) {
-                camera.x -= pointer.screenX - lastPointer.screenX;
-                camera.y -= pointer.screenY - lastPointer.screenY;
+                camera.x -= (pointer.screenX - lastPointer.screenX) / camera.zoom;
+                camera.y -= (pointer.screenY - lastPointer.screenY) / camera.zoom;
             }
 
-            // Screen/World translation for pointer
-            pointer.worldX = pointer.screenX + camera.x;
-            pointer.worldY = pointer.screenY + camera.y;
+            // Screen to World calculation with zoom
+            pointer.worldX = (pointer.screenX - width/2) / camera.zoom + camera.x + width/2;
+            pointer.worldY = (pointer.screenY - height/2) / camera.zoom + camera.y + height/2;
 
             if (pointer.isDown && draggedObj) {
                 pointer.vx = pointer.worldX - lastPointer.worldX;
                 pointer.vy = pointer.worldY - lastPointer.worldY;
             }
 
-            lastPointer.screenX = pointer.screenX;
-            lastPointer.screenY = pointer.screenY;
-            lastPointer.worldX = pointer.worldX;
-            lastPointer.worldY = pointer.worldY;
+            lastPointer.screenX = pointer.screenX; lastPointer.screenY = pointer.screenY;
+            lastPointer.worldX = pointer.worldX; lastPointer.worldY = pointer.worldY;
 
-            // Update Entities
             entities.radars.forEach(r => r.update());
             entities.mlrs.forEach(m => m.update());
+            entities.jets.forEach(j => j.update());
             entities.crams.forEach(c => c.update());
             entities.targets.forEach(t => t.update());
             entities.particles.forEach(p => p.update());
             entities.particles = entities.particles.filter(p => p.life > 0);
 
-            // Update Bullets & NN Training
+            // Update Bullets & C-RAM Training
             for (let i = entities.bullets.length - 1; i >= 0; i--) {
                 let b = entities.bullets[i];
                 if (!b.active) continue;
@@ -590,49 +731,47 @@
                 let t = b.target;
                 if (!t || t.dead) { b.active = false; continue; }
 
+                let isJet = (t instanceof Jet);
                 let dist = Math.hypot(b.x - t.x, b.y - t.y);
+                let hitRadius = isJet ? 30 : t.r + 5;
 
                 // Hit Detection
-                if (dist < t.r + 5) {
-                    b.parent.shotsHit++; b.parent.trainCount++;
-                    b.active = false;
-                    b.parent.nn.train([b.predictedOffset]); // Perfect hit, enforce choice
+                if (dist < hitRadius) {
+                    b.parent.shotsHit++; b.parent.trainCount++; b.active = false;
+                    b.parent.nn.train([b.predictedOffset]); // Perfect hit
                     
-                    t.vx += b.vx * 0.05; t.vy += b.vy * 0.05;
-                    t.hits++;
-                    
-                    if (t.hits >= t.maxHits) {
-                        t.dead = true;
-                        createExplosion(t.x, t.y, t.type === 'missile' ? 1.5 : 2, t.color);
+                    if (isJet) {
+                        t.onHit();
                     } else {
-                        for(let p = 0; p < 5; p++) entities.particles.push(new Particle(b.x, b.y, (Math.random()-0.5)*5, (Math.random()-0.5)*5, '#ff5555'));
+                        t.vx += b.vx * 0.05; t.vy += b.vy * 0.05; t.hits++;
+                        if (t.hits >= t.maxHits) {
+                            t.dead = true;
+                            createExplosion(t.x, t.y, t.type === 'bomb' ? 2 : 1.5, t.color);
+                        } else {
+                            for(let p = 0; p < 5; p++) entities.particles.push(new Particle(b.x, b.y, (Math.random()-0.5)*5, (Math.random()-0.5)*5, '#ff5555'));
+                        }
                     }
                     continue;
                 }
 
-                // AI Evaluation (Closest Approach)
                 if (!b.evaluated) {
                     if (dist < b.minDist) {
-                        b.minDist = dist;
-                        b.closestTx = t.x; b.closestTy = t.y;
-                    } else if (dist > b.minDist + 2) { // Passed the target
+                        b.minDist = dist; b.closestTx = t.x; b.closestTy = t.y;
+                    } else if (dist > b.minDist + 2) { 
                         b.evaluated = true;
                         let idealAngle = Math.atan2(b.closestTy - b.parent.y, b.closestTx - b.parent.x);
                         let idealOffset = idealAngle - b.baseAngle;
-                        
                         while (idealOffset > Math.PI) idealOffset -= Math.PI * 2;
                         while (idealOffset < -Math.PI) idealOffset += Math.PI * 2;
-
                         b.parent.nn.train([idealOffset]);
                         b.parent.trainCount++;
                     }
                 }
-
-                // Remove far offscreen bounds (relative to active area)
-                if (Math.abs(b.x - b.parent.x) > 3000 || b.y < -2000 || b.y > worldFloorY + 200) b.active = false;
+                if (Math.abs(b.x - b.parent.x) > 4000 || b.y < -3000 || b.y > worldFloorY + 200) b.active = false;
             }
             
             entities.bullets = entities.bullets.filter(b => b.active);
+            entities.jets = entities.jets.filter(j => !j.dead);
             entities.targets = entities.targets.filter(t => {
                 if (t.dead && draggedObj === t) { draggedObj = null; pointer.isDown = false; }
                 return !t.dead;
@@ -642,35 +781,34 @@
 
         function draw() {
             ctx.clearRect(0, 0, width, height);
-
-            // Draw Sky (Fixed to screen)
             let grad = ctx.createLinearGradient(0, 0, 0, height);
             grad.addColorStop(0, '#0b0c10'); grad.addColorStop(1, '#1f2833');
             ctx.fillStyle = grad; ctx.fillRect(0, 0, width, height);
 
             ctx.save();
-            ctx.translate(-camera.x, -camera.y);
+            // Apply Camera Transform
+            ctx.translate(width/2, height/2);
+            ctx.scale(camera.zoom, camera.zoom);
+            ctx.translate(-width/2 - camera.x, -height/2 - camera.y);
 
             // Draw World Floor
             ctx.fillStyle = '#111';
-            // Draw floor infinitely by spanning across current camera view heavily padded
-            ctx.fillRect(camera.x - 2000, worldFloorY, width + 4000, 2000);
+            ctx.fillRect(camera.x - 3000/camera.zoom, worldFloorY, width/camera.zoom + 6000/camera.zoom, 2000);
             
-            // Grid lines on floor for perspective
             ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
-            let startX = Math.floor(camera.x / 100) * 100 - 100;
-            for(let x = startX; x < camera.x + width + 200; x += 100) {
+            let startX = Math.floor((camera.x - 2000/camera.zoom) / 100) * 100;
+            for(let x = startX; x < camera.x + width/camera.zoom + 2000/camera.zoom; x += 100) {
                 ctx.beginPath(); ctx.moveTo(x, worldFloorY); ctx.lineTo(x, worldFloorY + 2000); ctx.stroke();
             }
             
-            // Floor highlight edge
             ctx.strokeStyle = '#444'; ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.moveTo(camera.x - 2000, worldFloorY); ctx.lineTo(camera.x + width + 2000, worldFloorY); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(camera.x - 3000/camera.zoom, worldFloorY); ctx.lineTo(camera.x + width/camera.zoom + 3000/camera.zoom, worldFloorY); ctx.stroke();
 
             // Draw Entities
             entities.radars.forEach(r => r.draw(ctx));
             entities.mlrs.forEach(m => m.draw(ctx));
             entities.targets.forEach(t => t.draw(ctx));
+            entities.jets.forEach(j => j.draw(ctx));
             entities.crams.forEach(c => c.draw(ctx));
             entities.particles.forEach(p => p.draw(ctx));
 
@@ -680,64 +818,53 @@
             ctx.strokeStyle = "#ff5555"; ctx.lineCap = "round"; ctx.lineWidth = 4;
             ctx.beginPath();
             for (let b of entities.bullets) {
-                ctx.moveTo(b.x, b.y);
-                ctx.lineTo(b.x - b.vx * 1.5, b.y - b.vy * 1.5);
+                ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - b.vx * 1.5, b.y - b.vy * 1.5);
             }
-            ctx.stroke();
-            ctx.restore();
+            ctx.stroke(); ctx.restore();
 
-            ctx.restore(); // End World Space
+            ctx.restore(); 
+            
+            // UI Overlay (Jet Generations)
+            ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '14px Inter'; ctx.textAlign = 'right';
+            ctx.fillText(`Global Jet AI Generation: ${jetGenerations}`, width - 20, 20);
+
             requestAnimationFrame(gameLoop);
         }
 
-        function gameLoop() {
-            update(); draw();
-        }
+        function gameLoop() { update(); draw(); }
 
         // --- INPUT BINDINGS ---
-
         function handlePointerDown(e) {
             let isTouch = e.touches !== undefined;
             pointer.screenX = isTouch ? e.touches[0].clientX : e.clientX;
             pointer.screenY = isTouch ? e.touches[0].clientY : e.clientY;
-            pointer.worldX = pointer.screenX + camera.x;
-            pointer.worldY = pointer.screenY + camera.y;
+            pointer.worldX = (pointer.screenX - width/2) / camera.zoom + camera.x + width/2;
+            pointer.worldY = (pointer.screenY - height/2) / camera.zoom + camera.y + height/2;
             pointer.btn = e.button;
 
-            if (e.button === 1 || e.button === 2) {
-                pointer.isPanning = true;
-                return;
-            }
+            if (e.button === 1 || e.button === 2) { pointer.isPanning = true; return; }
 
             pointer.isDown = true;
             let interacted = false;
 
-            // 1. Check MLRS toggle
             for (let m of entities.mlrs) {
                 if (Math.abs(pointer.worldX - m.x) < 50 && Math.abs(pointer.worldY - (m.y-20)) < 40) {
-                    m.manual = !m.manual;
-                    interacted = true;
-                    break;
+                    m.manual = !m.manual; interacted = true; break;
                 }
             }
 
-            // 2. Check Target Drag
             if (!interacted) {
                 for (let t of entities.targets) {
                     if (t.type === 'box' && Math.hypot(t.x - pointer.worldX, t.y - pointer.worldY) < t.r * 1.5) {
-                        draggedObj = t; t.vx = 0; t.vy = 0;
-                        interacted = true;
-                        break;
+                        draggedObj = t; t.vx = 0; t.vy = 0; interacted = true; break;
                     }
                 }
             }
 
-            // 3. Fire active manual MLRS
             if (!interacted && e.button === 0) {
                 let activeMLRS = entities.mlrs.find(m => m.manual);
                 if (activeMLRS && activeMLRS.cooldown <= 0) {
-                    activeMLRS.fire(activeMLRS.angle);
-                    activeMLRS.cooldown = 30; // Shorter manual cooldown
+                    activeMLRS.fire(activeMLRS.angle); activeMLRS.cooldown = 30;
                 }
             }
         }
@@ -749,13 +876,10 @@
         }
 
         function handlePointerUp(e) {
-            if (e.button === 1 || e.button === 2) { pointer.isPanning = false; }
+            if (e.button === 1 || e.button === 2) pointer.isPanning = false;
             if (e.button === 0) {
                 pointer.isDown = false;
-                if (draggedObj) {
-                    draggedObj.vx = pointer.vx; draggedObj.vy = pointer.vy;
-                    draggedObj = null;
-                }
+                if (draggedObj) { draggedObj.vx = pointer.vx; draggedObj.vy = pointer.vy; draggedObj = null; }
             }
             if (e.touches && e.touches.length === 0) { pointer.isDown = false; pointer.isPanning = false; if(draggedObj){draggedObj.vx=pointer.vx;draggedObj.vy=pointer.vy;draggedObj=null;} }
         }
@@ -763,6 +887,10 @@
         canvas.addEventListener('mousedown', handlePointerDown);
         canvas.addEventListener('mousemove', handlePointerMove);
         window.addEventListener('mouseup', handlePointerUp);
+        window.addEventListener('wheel', e => { 
+            let zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+            camera.zoom = Math.max(0.2, Math.min(camera.zoom * zoomFactor, 3.0));
+        });
         
         canvas.addEventListener('touchstart', (e) => { if(e.target === canvas) e.preventDefault(); handlePointerDown(e); }, {passive: false});
         canvas.addEventListener('touchmove', (e) => { if(e.target === canvas) e.preventDefault(); handlePointerMove(e); }, {passive: false});
@@ -772,26 +900,23 @@
         window.addEventListener('keyup', e => keys[e.key] = false);
 
         // --- UI BUTTONS ---
-        // Spawns items precisely in the center of the current camera view
+        function getSpawnX() { return camera.x + width/2; }
         
-        document.getElementById('btn-box').addEventListener('click', () => {
-            entities.targets.push(new Target('box', camera.x + width/2 + (Math.random()-0.5)*200, camera.y + 100));
+        document.getElementById('btn-box').addEventListener('click', () => entities.targets.push(new Target('box', getSpawnX() + (Math.random()-0.5)*200, camera.y + height/2)));
+        document.getElementById('btn-cram').addEventListener('click', () => entities.crams.push(new CRAM(getSpawnX(), worldFloorY)));
+        document.getElementById('btn-radar').addEventListener('click', () => entities.radars.push(new Radar(getSpawnX(), worldFloorY)));
+        document.getElementById('btn-mlrs').addEventListener('click', () => entities.mlrs.push(new MLRS(getSpawnX(), worldFloorY)));
+        document.getElementById('btn-jet').addEventListener('click', () => {
+            let dir = Math.random() > 0.5 ? 1 : -1;
+            let startX = getSpawnX() - dir * (width/camera.zoom/2 + 500);
+            entities.jets.push(new Jet(startX, worldFloorY - 800, dir));
         });
         
-        document.getElementById('btn-cram').addEventListener('click', () => {
-            entities.crams.push(new CRAM(camera.x + width/2, camera.y - 100));
-        });
-
-        document.getElementById('btn-radar').addEventListener('click', () => {
-            entities.radars.push(new Radar(camera.x + width/2, camera.y - 100));
-        });
-
-        document.getElementById('btn-mlrs').addEventListener('click', () => {
-            entities.mlrs.push(new MLRS(camera.x + width/2, camera.y - 100));
-        });
+        document.getElementById('btn-zoom-in').addEventListener('click', () => camera.zoom = Math.min(camera.zoom * 1.2, 3.0));
+        document.getElementById('btn-zoom-out').addEventListener('click', () => camera.zoom = Math.max(camera.zoom * 0.8, 0.2));
 
         document.getElementById('btn-clear').addEventListener('click', () => {
-            entities.targets = []; entities.bullets = []; entities.crams = []; entities.radars = []; entities.mlrs = []; entities.particles = [];
+            entities.targets = []; entities.bullets = []; entities.crams = []; entities.radars = []; entities.mlrs = []; entities.jets = []; entities.particles = [];
         });
 
         // Setup Initial Scene
@@ -800,9 +925,7 @@
         entities.crams.push(new CRAM(300, worldFloorY));
         entities.mlrs.push(new MLRS(800, worldFloorY));
 
-        // Start Loop
         requestAnimationFrame(gameLoop);
-
     </script>
 </body>
 </html>
