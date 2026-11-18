@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>train</title>
+    <title>AI Evolution: Bipedal Runner & Jumper</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Matter.js Physics Engine -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
@@ -217,6 +217,20 @@
                         <option value="boxes">Flat with Boxes</option>
                         <option value="hills">Hills / Uneven</option>
                     </select>
+                </div>
+
+                <!-- Population Size -->
+                <div class="flex flex-col gap-2">
+                    <label for="pop-slider" class="text-sm font-medium flex justify-between text-slate-200">
+                        Population <span id="pop-val" class="text-blue-400">30</span>
+                    </label>
+                    <input type="range" id="pop-slider" min="10" max="150" value="30" step="10" class="w-full cursor-pointer accent-blue-500">
+                </div>
+
+                <!-- Render Optimization -->
+                <div class="flex items-center gap-2 mt-1">
+                    <input type="checkbox" id="render-best-toggle" class="cursor-pointer w-4 h-4 accent-blue-500">
+                    <label for="render-best-toggle" class="text-sm font-medium text-slate-200 cursor-pointer">Only Draw Best Bot</label>
                 </div>
 
                 <div class="flex flex-col gap-2 mt-2">
@@ -711,9 +725,14 @@
         const mapSelect = document.getElementById('map-select');
         const btnReset = document.getElementById('btn-reset');
         const btnKill = document.getElementById('btn-kill');
+        
+        // New UI Elements
+        const popSlider = document.getElementById('pop-slider');
+        const popVal = document.getElementById('pop-val');
+        const renderBestToggle = document.getElementById('render-best-toggle');
 
         // Simulation Configuration
-        const POPULATION_SIZE = 30;
+        let POPULATION_SIZE = 30; // Changed to let so it can be updated
         const GENERATION_TIME = 600; // frames per generation
         
         let population = [];
@@ -721,6 +740,7 @@
         let frameCount = 0;
         let simSpeed = parseInt(speedSlider.value);
         let bestGlobalFitness = 0;
+        let renderBestOnly = false;
         
         let obstacles = [];
         let groundBodies = [];
@@ -947,6 +967,7 @@
             let bestX = -Infinity;
             let bestY = 0;
             let aliveCount = 0;
+            let bestBot = null;
             
             for (let p of population) {
                 if (!p.isDead) {
@@ -954,11 +975,20 @@
                     if (p.torso.position.x > bestX) {
                         bestX = p.torso.position.x;
                         bestY = p.torso.position.y;
+                        bestBot = p;
                     }
                 }
             }
 
-            statAlive.innerText = `${aliveCount} / ${POPULATION_SIZE}`;
+            // Draw Call Optimization: Hide poorly performing bots
+            if (renderBestOnly && bestBot) {
+                for (let p of population) {
+                    let isVisible = (p === bestBot);
+                    p.parts.forEach(part => part.render.visible = isVisible);
+                }
+            }
+
+            statAlive.innerText = `${aliveCount} / ${population.length}`;
             statTime.innerText = Math.ceil((GENERATION_TIME - frameCount) / 60) + 's';
 
             if (aliveCount === 0 || frameCount >= GENERATION_TIME) {
@@ -1038,7 +1068,18 @@
         });
 
         popSlider.addEventListener('input', (e) => {
-            popVal.innerText = e.target.value;
+            POPULATION_SIZE = parseInt(e.target.value);
+            popVal.innerText = POPULATION_SIZE;
+        });
+
+        renderBestToggle.addEventListener('change', (e) => {
+            renderBestOnly = e.target.checked;
+            // Instantly restore visibility if turned off
+            if (!renderBestOnly) {
+                population.forEach(p => {
+                    p.parts.forEach(part => part.render.visible = true);
+                });
+            }
         });
 
         mapSelect.addEventListener('change', () => {
