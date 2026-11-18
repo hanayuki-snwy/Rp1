@@ -289,19 +289,31 @@
                 return Math.tanh(x);
             }
 
-            predict(inputArray) {
-                // Input to Hidden
-                let hidden = this.dotProduct(this.weightsIH, inputArray);
-                hidden = this.addBias(hidden, this.biasH);
-                hidden = this.mapMatrix(hidden, this.tanh);
+            predict(inputs) {
+                // Highly optimized inline prediction to prevent Garbage Collection lag
+                // We pre-allocate these arrays so we reuse them instead of creating new ones
+                if (!this.hiddenOut) this.hiddenOut = new Array(this.hiddenNodes);
+                if (!this.finalOut) this.finalOut = new Array(this.outputNodes);
 
-                // Hidden to Output
-                let output = this.dotProduct(this.weightsHO, hidden);
-                output = this.addBias(output, this.biasO);
-                output = this.mapMatrix(output, this.tanh);
+                // Input to Hidden Layer
+                for (let i = 0; i < this.hiddenNodes; i++) {
+                    let sum = this.biasH[i][0];
+                    for (let j = 0; j < this.inputNodes; j++) {
+                        sum += this.weightsIH[i][j] * inputs[j];
+                    }
+                    this.hiddenOut[i] = Math.tanh(sum);
+                }
 
-                // Return 1D array
-                return output.map(row => row[0]);
+                // Hidden to Output Layer
+                for (let i = 0; i < this.outputNodes; i++) {
+                    let sum = this.biasO[i][0];
+                    for (let j = 0; j < this.hiddenNodes; j++) {
+                        sum += this.weightsHO[i][j] * this.hiddenOut[j];
+                    }
+                    this.finalOut[i] = Math.tanh(sum);
+                }
+
+                return this.finalOut;
             }
 
             // Matrix Operations
@@ -417,9 +429,11 @@
                 // Neural Net Setup
                 // Inputs: 
                 // 1. Torso Angle, 2. Torso AngVel, 3. Torso Y pos
-                // 4-11: 8 Joint Angles, 12-19: 8 Joint AngVels
-                // 20-22: Raycasts (Forward, Down-Forward, Down)
-                this.inputs = 22;
+                // 4-5. Torso Vel X, Y (Momentum awareness)
+                // 6-7. Lower Leg Global Angles (Orientation awareness)
+                // 8-15: 8 Joint Relative Angles, 16-23: 8 Joint AngVels
+                // 24-26: Raycasts (Forward, Down-Forward, Down)
+                this.inputs = 26; // Increased from 22
                 this.hidden = 16;
                 this.outputs = 8; // Target angles for 8 joints
                 
@@ -560,6 +574,12 @@
                 inputs.push(this.torso.angularVelocity);
                 inputs.push(this.torso.position.y / 1000);
 
+                // NEW: Momentum and Global Orientation Awareness
+                inputs.push(this.torso.velocity.x / 10); // Forward/backward speed
+                inputs.push(this.torso.velocity.y / 10); // Falling speed
+                inputs.push(this.legL.lower.angle / Math.PI); // Left foot pointing direction
+                inputs.push(this.legR.lower.angle / Math.PI); // Right foot pointing direction
+
                 // Joint angles and velocities
                 for (let i = 0; i < 8; i++) {
                     let joint = this.joints[i];
@@ -641,8 +661,8 @@
                 // Reward forward distance heavily
                 let fit = Math.max(0, dist); 
                 
-                // Huge bonus for staying alive to teach it how to stand before walking
-                fit += this.timeAlive * 2.0; 
+                // Massive bonus for staying alive to heavily prioritize standing up longest
+                fit += this.timeAlive * 10.0; 
                 
                 // Penalty for being tilted over
                 let tiltPenalty = Math.abs(this.torso.angle);
@@ -653,13 +673,12 @@
             }
 
             die() {
+                if (this.isDead) return; // Prevent multiple triggers
                 this.isDead = true;
                 this.calculateFitness();
-                // Change color to grey
-                for (let part of this.parts) {
-                    part.render.fillStyle = '#475569'; // slate-600
-                    part.render.opacity = 0.5;
-                }
+                
+                // Instantly remove from physics world to eliminate lag
+                this.destroy();
             }
 
             destroy() {
@@ -983,6 +1002,7 @@
             // Draw Call Optimization: Hide poorly performing bots
             if (renderBestOnly && bestBot) {
                 for (let p of population) {
+                    if (p.isDead) continue; // Skip already removed bots
                     let isVisible = (p === bestBot);
                     p.parts.forEach(part => part.render.visible = isVisible);
                 }
@@ -1023,10 +1043,10 @@
         // --- BACKGROUND WORKER FOR PHYSICS LOOP ---
         // Decoupled from requestAnimationFrame so it runs in background tabs
         const workerCode = `
-            let intervalId = null;
             self.onmessage = function(e) {
-                if (e.data === 'start') {
-                    intervalId = setInterval(() => self.postMessage('tick'), 1000 / 60);
+                // Ping-pong architecture: Worker only sends a tick when the main thread says it's ready
+                if (e.data === 'start' || e.data === 'done') {
+                    setTimeout(() => self.postMessage('tick'), 1000 / 60);
                 }
             };
         `;
@@ -1051,6 +1071,9 @@
                 }
 
                 updateCamera();
+                
+                // Tell the worker we finished processing this frame, so it can queue the next one
+                workerTimer.postMessage('done'); 
             }
         };
 
