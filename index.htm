@@ -675,15 +675,34 @@
                 if (this.fitness !== 0) return this.fitness; // Already calculated
                 
                 let dist = this.torso.position.x - this.startX;
-                // Reward forward distance heavily
-                let fit = Math.max(0, dist); 
+                let fit = 0;
                 
-                // Massive bonus for staying alive to heavily prioritize standing up longest
-                fit += this.timeAlive * 10.0; 
+                // 1. SURVIVAL & POSTURE (Primary Goal)
+                // Base reward for staying alive
+                fit += this.timeAlive * 5.0; 
                 
+                // Reward for keeping torso high above the feet
+                let avgFootY = (this.legL.lower.position.y + this.legR.lower.position.y) / 2;
+                let heightDiff = Math.max(0, avgFootY - this.torso.position.y);
+                fit += heightDiff * 2.0;
+                
+                // 2. DISTANCE (Secondary Goal)
+                // Prevent "leap and die": distance is multiplied by the square of their survival ratio.
+                // A bot that leaps and dies early gets almost no distance points.
+                let survivalRatio = this.timeAlive / GENERATION_TIME;
+                if (dist > 0) {
+                    fit += dist * 2.0 * (survivalRatio * survivalRatio);
+                }
+                
+                // 3. PUNISHMENTS
                 // Penalty for being tilted over
                 let tiltPenalty = Math.abs(this.torso.angle);
-                fit -= tiltPenalty * 30;
+                fit -= tiltPenalty * 50;
+
+                // Harsh punishment for falling over before the time is up
+                if (this.timeAlive < GENERATION_TIME) {
+                    fit *= 0.3; // Slash total score by 70% if they didn't survive the whole round
+                }
 
                 this.fitness = Math.max(0.1, fit); // Minimum fitness to avoid zero
                 return this.fitness;
