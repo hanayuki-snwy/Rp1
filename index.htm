@@ -431,11 +431,11 @@
                 // 1. Torso Angle, 2. Torso AngVel, 3. Torso Y pos
                 // 4-5. Torso Vel X, Y (Momentum awareness)
                 // 6-7. Lower Leg Global Angles (Orientation awareness)
-                // 8-15: 8 Joint Relative Angles, 16-23: 8 Joint AngVels
-                // 24-26: Raycasts (Forward, Down-Forward, Down)
-                this.inputs = 26; // Increased from 22
-                this.hidden = 16;
-                this.outputs = 8; // Target angles for 8 joints
+                // 8-16: 9 Joint Relative Angles, 17-25: 9 Joint AngVels
+                // 26-28: Raycasts (Forward, Down-Forward, Down)
+                this.inputs = 28; // Increased for waist joint
+                this.hidden = 18;
+                this.outputs = 9; // Target angles for 9 joints (added waist)
                 
                 if (brain) {
                     this.brain = brain.copy();
@@ -468,15 +468,25 @@
                     mask: CATEGORY_ENVIRONMENT 
                 };
 
-                // 1. Torso
-                this.torso = Bodies.rectangle(x, y - 50, 20, 50, { 
+                // 1. Torso (Split into Chest and Pelvis for waist control)
+                this.chest = Bodies.rectangle(x, y - 62.5, 20, 25, { 
                     collisionFilter: botCollisionFilter, 
-                    density: density * 0.5, // Lighter torso for lower center of gravity
+                    density: density * 0.25, 
                     render: torsoRender,
-                    label: 'Torso'
+                    label: 'Chest'
                 });
-                this.torso.creature = this;
-                this.parts.push(this.torso);
+                this.pelvis = Bodies.rectangle(x, y - 37.5, 20, 25, { 
+                    collisionFilter: botCollisionFilter, 
+                    density: density * 0.25, 
+                    render: torsoRender,
+                    label: 'Pelvis'
+                });
+                this.chest.creature = this;
+                this.pelvis.creature = this;
+                this.parts.push(this.chest, this.pelvis);
+                
+                // Alias torso to chest for legacy tracking (camera, fitness, death conditions)
+                this.torso = this.chest;
 
                 // Helper to create limbs
                 const createLimb = (offsetX, offsetY, width, upperLen, lowerLen, label) => {
@@ -516,16 +526,21 @@
                     this.joints.push({ parent: bodyA, child: bodyB, type: type });
                 };
 
-                // Hips (Torso to Upper Legs)
-                connect(this.torso, this.legL.upper, {x:0, y:20}, {x:0, y:-12}, 'hip');
-                connect(this.torso, this.legR.upper, {x:0, y:20}, {x:0, y:-12}, 'hip');
+                // Waist (Chest to Pelvis)
+                connect(this.chest, this.pelvis, {x:0, y:12}, {x:0, y:-12}, 'waist');
+
+                // Hips (Pelvis to Upper Legs)
+                connect(this.pelvis, this.legL.upper, {x:0, y:10}, {x:0, y:-12}, 'hip');
+                connect(this.pelvis, this.legR.upper, {x:0, y:10}, {x:0, y:-12}, 'hip');
+                
                 // Knees (Upper to Lower Legs)
                 connect(this.legL.upper, this.legL.lower, {x:0, y:12}, {x:0, y:-12}, 'knee');
                 connect(this.legR.upper, this.legR.lower, {x:0, y:12}, {x:0, y:-12}, 'knee');
                 
-                // Shoulders (Torso to Upper Arms)
-                connect(this.torso, this.armL.upper, {x:0, y:-20}, {x:0, y:-10}, 'shoulder');
-                connect(this.torso, this.armR.upper, {x:0, y:-20}, {x:0, y:-10}, 'shoulder');
+                // Shoulders (Chest to Upper Arms)
+                connect(this.chest, this.armL.upper, {x:0, y:-10}, {x:0, y:-10}, 'shoulder');
+                connect(this.chest, this.armR.upper, {x:0, y:-10}, {x:0, y:-10}, 'shoulder');
+                
                 // Elbows (Upper to Lower Arms)
                 connect(this.armL.upper, this.armL.lower, {x:0, y:10}, {x:0, y:-10}, 'elbow');
                 connect(this.armR.upper, this.armR.lower, {x:0, y:10}, {x:0, y:-10}, 'elbow');
@@ -581,7 +596,7 @@
                 inputs.push(this.legR.lower.angle / Math.PI); // Right foot pointing direction
 
                 // Joint angles and velocities
-                for (let i = 0; i < 8; i++) {
+                for (let i = 0; i < this.outputs; i++) {
                     let joint = this.joints[i];
                     let relAngle = (joint.child.angle - joint.parent.angle);
                     // Normalize relative angle
@@ -604,7 +619,7 @@
                 const pGain = 0.06; // Increased Proportional gain
                 const dGain = 0.01; // Increased Derivative gain
 
-                for (let i = 0; i < 8; i++) {
+                for (let i = 0; i < this.outputs; i++) {
                     let joint = this.joints[i];
                     
                     // Smooth the neural network output to prevent violent jittering
@@ -613,9 +628,11 @@
                     // Map output (-1 to 1) to target angle (-PI/2 to PI/2 approx)
                     let targetAngle = this.smoothedOutputs[i] * (Math.PI / 1.5); 
                     
-                    // Constrain Knees to human-like limits (prevent bending backwards)
+                    // Constrain Knees and Waist to human-like limits
                     if (joint.type === 'knee') {
                         targetAngle = Math.max(-0.1, Math.min(Math.PI / 1.2, targetAngle));
+                    } else if (joint.type === 'waist') {
+                        targetAngle = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, targetAngle));
                     }
 
                     let currentRelAngle = joint.child.angle - joint.parent.angle;
