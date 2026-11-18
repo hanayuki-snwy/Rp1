@@ -2,33 +2,36 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>C-RAM AI Sandbox</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #0b0c10; color: white; font-family: 'Inter', sans-serif; touch-action: none; }
-        canvas { display: block; width: 100vw; height: 100vh; }
-        .ui-layer { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; padding: 1rem; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
-        .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
+        body { margin: 0; overflow: hidden; background: #0b0c10; color: white; font-family: 'Inter', sans-serif; touch-action: none; user-select: none; }
+        canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+        .ui-layer { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; padding: 1rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; z-index: 10; }
+        .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; background: rgba(0,0,0,0.4); padding: 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
         .btn { 
-            background: rgba(255, 255, 255, 0.05); 
-            border: 1px solid rgba(255, 255, 255, 0.1); 
-            padding: 10px 20px; 
-            border-radius: 8px; 
-            backdrop-filter: blur(8px); 
-            cursor: pointer; 
-            pointer-events: auto;
-            color: #ccc;
-            font-weight: 500;
-            transition: all 0.2s;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.2); 
+            padding: 8px 16px; border-radius: 6px; cursor: pointer; pointer-events: auto;
+            color: #ddd; font-weight: 600; font-size: 0.9rem; transition: all 0.2s;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3); text-shadow: 0 1px 2px rgba(0,0,0,0.5);
         }
-        .btn:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.3); color: #fff; }
-        .btn:active { transform: scale(0.95); }
+        .btn:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.4); color: #fff; transform: translateY(-1px); }
+        .btn:active { transform: translateY(1px) scale(0.98); }
+        
         .btn-cram { border-color: rgba(255, 60, 60, 0.4); color: #ff7777; background: rgba(255, 0, 0, 0.05); }
         .btn-cram:hover { background: rgba(255, 60, 60, 0.2); border-color: #ff5555; color: #fff; box-shadow: 0 0 15px rgba(255, 0, 0, 0.4); }
-        .instructions { background: rgba(0, 0, 0, 0.6); padding: 10px 20px; border-radius: 8px; font-size: 0.85rem; color: #aaa; text-align: center; max-width: 600px; border: 1px solid rgba(255,255,255,0.05); }
+        
+        .btn-radar { border-color: rgba(60, 255, 120, 0.4); color: #77ff99; background: rgba(0, 255, 50, 0.05); }
+        .btn-radar:hover { background: rgba(60, 255, 120, 0.2); border-color: #55ff77; color: #fff; box-shadow: 0 0 15px rgba(0, 255, 50, 0.4); }
+
+        .btn-mlrs { border-color: rgba(60, 150, 255, 0.4); color: #77baff; background: rgba(0, 100, 255, 0.05); }
+        .btn-mlrs:hover { background: rgba(60, 150, 255, 0.2); border-color: #55aaff; color: #fff; box-shadow: 0 0 15px rgba(0, 100, 255, 0.4); }
+
+        .instructions { background: rgba(0, 0, 0, 0.7); padding: 12px 20px; border-radius: 8px; font-size: 0.8rem; color: #bbb; text-align: center; max-width: 800px; border: 1px solid rgba(255,255,255,0.05); }
         .highlight { color: #ff5555; font-weight: bold; }
+        .highlight-blue { color: #55aaff; font-weight: bold; }
+        .highlight-green { color: #55ff77; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -37,24 +40,24 @@
     
     <div class="ui-layer">
         <div class="controls">
-            <button class="btn" id="btn-ball">Spawn Ball</button>
-            <button class="btn" id="btn-crate">Spawn Crate</button>
-            <button class="btn btn-cram" id="btn-cram">Deploy C-RAM</button>
-            <button class="btn" id="btn-clear">Clear Targets</button>
+            <button class="btn" id="btn-box">Drop Box</button>
+            <button class="btn btn-cram" id="btn-cram">Spawn C-RAM</button>
+            <button class="btn btn-radar" id="btn-radar">Spawn Radar</button>
+            <button class="btn btn-mlrs" id="btn-mlrs">Spawn MLRS</button>
+            <button class="btn" id="btn-clear" style="margin-left: 10px; border-color: #666;">Clear All</button>
         </div>
         <div class="instructions">
-            Drag and throw objects. C-RAM uses a <span class="highlight">Neural Network</span> to predict parabolic trajectories. 
-            It learns from its misses by backpropagating the angular error at the closest approach point!
+            <b>Controls:</b> [Right-Click / Middle-Click / WASD] to Pan Camera. [Left-Click] to Drag Boxes or Toggle MLRS. <br/>
+            C-RAMs use a <span class="highlight">Neural Network</span> to learn trajectories. They predict target impacts and prioritize defending <span class="highlight-green">Radars</span>. <br/>
+            Click an <span class="highlight-blue">MLRS</span> to toggle Auto/Manual mode. In Manual, click anywhere to fire!
         </div>
     </div>
 
     <script>
         // --- CUSTOM NEURAL NETWORK (MLP) ---
-        // A lightweight Multilayer Perceptron to learn intercept angles.
         class MLP {
             constructor(ni, nh, no, lr = 0.02) {
                 this.ni = ni; this.nh = nh; this.no = no; this.lr = lr;
-                // Initialize weights with small random values
                 this.w1 = Array.from({length: ni * nh}, () => (Math.random() - 0.5) * 0.5);
                 this.b1 = Array.from({length: nh}, () => (Math.random() - 0.5) * 0.5);
                 this.w2 = Array.from({length: nh * no}, () => (Math.random() - 0.5) * 0.5);
@@ -66,563 +69,738 @@
                 this.h = new Array(this.nh);
                 for(let i = 0; i < this.nh; i++) {
                     let sum = this.b1[i];
-                    for(let j = 0; j < this.ni; j++) {
-                        sum += inp[j] * this.w1[i * this.ni + j];
-                    }
-                    this.h[i] = Math.tanh(sum); // Tanh activation for hidden layer
+                    for(let j = 0; j < this.ni; j++) sum += inp[j] * this.w1[i * this.ni + j];
+                    this.h[i] = Math.tanh(sum); 
                 }
                 this.out = new Array(this.no);
                 for(let i = 0; i < this.no; i++) {
                     let sum = this.b2[i];
-                    for(let j = 0; j < this.nh; j++) {
-                        sum += this.h[j] * this.w2[i * this.nh + j];
-                    }
-                    this.out[i] = sum; // Linear output
+                    for(let j = 0; j < this.nh; j++) sum += this.h[j] * this.w2[i * this.nh + j];
+                    this.out[i] = sum; 
                 }
                 return this.out;
             }
 
             train(target) {
-                // Calculate output error (MSE derivative)
                 let dOut = new Array(this.no);
-                for(let i = 0; i < this.no; i++) {
-                    dOut[i] = target[i] - this.out[i];
-                }
-
-                // Backpropagate to hidden layer
+                for(let i = 0; i < this.no; i++) dOut[i] = target[i] - this.out[i];
                 let dH = new Array(this.nh).fill(0);
                 for(let i = 0; i < this.no; i++) {
                     for(let j = 0; j < this.nh; j++) {
                         dH[j] += dOut[i] * this.w2[i * this.nh + j];
-                        // Update w2
                         this.w2[i * this.nh + j] += this.lr * dOut[i] * this.h[j];
                     }
-                    // Update b2
                     this.b2[i] += this.lr * dOut[i];
                 }
-
-                // Backpropagate to input layer
                 for(let i = 0; i < this.nh; i++) {
-                    let d = dH[i] * (1 - this.h[i] * this.h[i]); // Derivative of tanh
-                    for(let j = 0; j < this.ni; j++) {
-                        // Update w1
-                        this.w1[i * this.ni + j] += this.lr * d * this.inp[j];
-                    }
-                    // Update b1
+                    let d = dH[i] * (1 - this.h[i] * this.h[i]);
+                    for(let j = 0; j < this.ni; j++) this.w1[i * this.ni + j] += this.lr * d * this.inp[j];
                     this.b1[i] += this.lr * d;
                 }
             }
         }
 
-        // --- GAME ENGINE & PHYSICS ---
+        // --- GAME ENGINE & STATE ---
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         
-        let width, height, floorY;
+        let width, height;
+        const worldFloorY = 1200; // Absolute world Y coordinate for the ground
+        
+        let camera = { x: -window.innerWidth/2, y: worldFloorY - window.innerHeight + 100 };
+        let keys = {};
+        
         function resize() {
             width = canvas.width = window.innerWidth;
             height = canvas.height = window.innerHeight;
-            floorY = height - 100;
         }
         window.addEventListener('resize', resize);
         resize();
 
-        const GRAVITY = 0.25;
-        const DRAG = 0.99;
+        const GRAVITY = 0.22;
+        const DRAG = 0.992;
         
-        let targets = [];
-        let crams = [];
-        let bullets = [];
-        let particles = [];
+        let entities = {
+            targets: [], // Boxes, Missiles
+            crams: [],
+            radars: [],
+            mlrs: [],
+            bullets: [],
+            particles: []
+        };
 
-        // Interaction state
-        let pointer = { x: 0, y: 0, vx: 0, vy: 0, isDown: false };
-        let lastPointer = { x: 0, y: 0 };
+        let pointer = { screenX: 0, screenY: 0, worldX: 0, worldY: 0, vx: 0, vy: 0, isDown: false, btn: -1, isPanning: false };
+        let lastPointer = { worldX: 0, worldY: 0 };
         let draggedObj = null;
 
-        // --- ENTITIES ---
+        // Prevent context menu
+        window.addEventListener('contextmenu', e => e.preventDefault());
 
-        class Target {
-            constructor(type, x, y) {
-                this.type = type;
-                this.x = x;
-                this.y = y;
-                this.vx = (Math.random() - 0.5) * 10;
-                this.vy = 0;
-                this.r = type === 'ball' ? 20 : 25; // radius / half-size
-                this.restitution = type === 'ball' ? 0.7 : 0.3;
-                this.color = type === 'ball' ? '#4facf7' : '#e6a14c';
-                this.dead = false;
-                this.hits = 0;
-            }
-
-            update() {
-                if (draggedObj === this) {
-                    this.x = pointer.x;
-                    this.y = pointer.y;
-                    this.vx = pointer.x - lastPointer.x;
-                    this.vy = pointer.y - lastPointer.y;
-                    return;
-                }
-
-                this.vy += GRAVITY;
-                this.vx *= DRAG;
-                this.vy *= DRAG;
-
-                this.x += this.vx;
-                this.y += this.vy;
-
-                // Floor collision
-                if (this.y + this.r > floorY) {
-                    this.y = floorY - this.r;
-                    this.vy *= -this.restitution;
-                    this.vx *= 0.95; // Ground friction
-                }
-                
-                // Wall collisions
-                if (this.x - this.r < 0) { this.x = this.r; this.vx *= -this.restitution; }
-                if (this.x + this.r > width) { this.x = width - this.r; this.vx *= -this.restitution; }
-            }
-
-            draw(ctx) {
-                ctx.save();
-                ctx.translate(this.x, this.y);
-                ctx.fillStyle = this.color;
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                
-                if (this.type === 'ball') {
-                    ctx.beginPath();
-                    ctx.arc(0, 0, this.r, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.stroke();
-                } else {
-                    ctx.rotate(this.vx * 0.05); // Spin based on velocity
-                    ctx.beginPath();
-                    ctx.rect(-this.r, -this.r, this.r * 2, this.r * 2);
-                    ctx.fill();
-                    ctx.stroke();
-                    // Crate details
-                    ctx.beginPath();
-                    ctx.moveTo(-this.r, -this.r); ctx.lineTo(this.r, this.r);
-                    ctx.moveTo(this.r, -this.r); ctx.lineTo(-this.r, this.r);
-                    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-                    ctx.stroke();
-                }
-                ctx.restore();
-            }
-        }
-
-        class CRAM {
-            constructor(x, y) {
-                this.x = x;
-                this.y = y;
-                this.vy = 0;
-                // Neural Net: 4 inputs (dx, dy, tvx, tvy), 8 hidden, 1 output (angle_offset)
-                this.nn = new MLP(4, 8, 1);
-                this.cooldown = 0;
-                this.target = null;
-                this.aimAngle = -Math.PI / 2;
-                
-                // Stats
-                this.shotsFired = 0;
-                this.shotsHit = 0;
-                this.trainCount = 0;
-                this.accuracy = 0;
-            }
-
-            update() {
-                // Drop to floor
-                if (this.y < floorY) {
-                    this.vy += GRAVITY;
-                    this.y += this.vy;
-                    if (this.y > floorY) { this.y = floorY; this.vy = 0; }
-                }
-
-                if (this.cooldown > 0) this.cooldown--;
-
-                // Find valid target (in air)
-                let bestTarget = null;
-                let minDist = Infinity;
-                for (let t of targets) {
-                    if (t.y > floorY - t.r - 10) continue; // Ignore grounded targets
-                    if (draggedObj === t) continue; // Ignore currently dragged targets
-                    let d = Math.hypot(t.x - this.x, t.y - this.y);
-                    if (d < minDist && d < 1200) { // Range limit
-                        minDist = d;
-                        bestTarget = t;
-                    }
-                }
-                this.target = bestTarget;
-
-                if (this.target) {
-                    // Neural Network Prediction
-                    let dx = this.target.x - this.x;
-                    let dy = this.target.y - this.y;
-                    
-                    // Normalize inputs for NN (crucial for stability)
-                    let inputs = [
-                        dx / 1000, 
-                        dy / 1000, 
-                        this.target.vx / 20, 
-                        this.target.vy / 20
-                    ];
-                    
-                    let nnOutput = this.nn.forward(inputs);
-                    let offsetAngle = nnOutput[0]; // Radians
-                    
-                    // Clip offset to prevent crazy spinning early on
-                    offsetAngle = Math.max(-1.5, Math.min(1.5, offsetAngle));
-
-                    let baseAngle = Math.atan2(dy, dx);
-                    let targetAimAngle = baseAngle + offsetAngle;
-                    
-                    // Smoothly rotate barrel
-                    let angleDiff = targetAimAngle - this.aimAngle;
-                    // Normalize diff
-                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                    
-                    this.aimAngle += angleDiff * 0.5;
-
-                    // Fire
-                    if (this.cooldown <= 0 && Math.abs(angleDiff) < 0.2) {
-                        this.fire(inputs, offsetAngle, baseAngle);
-                    }
-                } else {
-                    // Return to rest position
-                    let angleDiff = -Math.PI / 2 - this.aimAngle;
-                    this.aimAngle += angleDiff * 0.1;
-                }
-            }
-
-            fire(inputs, predictedOffset, baseAngle) {
-                this.cooldown = 4; // Rapid fire
-                this.shotsFired++;
-                
-                let bSpeed = 25;
-                let bx = Math.cos(this.aimAngle) * bSpeed;
-                let by = Math.sin(this.aimAngle) * bSpeed;
-
-                // Barrel tip position
-                let tipX = this.x + Math.cos(this.aimAngle) * 30;
-                let tipY = this.y - 15 + Math.sin(this.aimAngle) * 30; // -15 is turret center offset
-
-                bullets.push({
-                    x: tipX, y: tipY,
-                    vx: bx, vy: by,
-                    parent: this,
-                    target: this.target,
-                    inputs: inputs,
-                    predictedOffset: predictedOffset,
-                    baseAngle: baseAngle,
-                    active: true,
-                    minDist: Infinity,
-                    evaluated: false
-                });
-
-                // Muzzle flash particles
-                for(let i=0; i<3; i++) {
-                    particles.push(new Particle(tipX, tipY, bx*0.2 + (Math.random()-0.5)*2, by*0.2 + (Math.random()-0.5)*2, '#ffaa00'));
-                }
-            }
-
-            draw(ctx) {
-                ctx.save();
-                ctx.translate(this.x, this.y);
-                
-                // Base
-                ctx.fillStyle = '#222';
-                ctx.strokeStyle = '#444';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(-30, 0); ctx.lineTo(-20, -15); ctx.lineTo(20, -15); ctx.lineTo(30, 0);
-                ctx.closePath();
-                ctx.fill(); ctx.stroke();
-                
-                // Turret / Barrel
-                ctx.translate(0, -15);
-                ctx.rotate(this.aimAngle);
-                
-                // Barrel
-                ctx.fillStyle = '#111';
-                ctx.fillRect(10, -4, 30, 8);
-                
-                // Dome
-                ctx.fillStyle = '#ddd';
-                ctx.beginPath();
-                ctx.arc(0, 0, 12, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.stroke();
-
-                ctx.restore();
-
-                // UI Stats
-                ctx.save();
-                ctx.translate(this.x, this.y - 45);
-                ctx.textAlign = 'center';
-                ctx.font = '10px Inter';
-                
-                let acc = this.shotsFired > 0 ? ((this.shotsHit / this.shotsFired) * 100).toFixed(1) : "0.0";
-                
-                // Hit rate
-                ctx.fillStyle = '#00ffaa';
-                ctx.fillText(`HIT: ${acc}%`, 0, 0);
-                
-                // Gen / Training count
-                ctx.fillStyle = '#ffaa00';
-                ctx.fillText(`GEN: ${this.trainCount}`, 0, 12);
-                ctx.restore();
-            }
-        }
+        // --- CLASSES ---
 
         class Particle {
-            constructor(x, y, vx, vy, color) {
+            constructor(x, y, vx, vy, color, type = 'normal') {
                 this.x = x; this.y = y;
                 this.vx = vx; this.vy = vy;
                 this.color = color;
+                this.type = type; // normal, smoke, fire
                 this.life = 1.0;
-                this.decay = Math.random() * 0.05 + 0.02;
+                this.decay = (type === 'smoke') ? (Math.random() * 0.01 + 0.005) : (Math.random() * 0.03 + 0.01);
+                this.size = (type === 'smoke') ? (Math.random() * 5 + 5) : (Math.random() * 3 + 1);
             }
             update() {
+                if (this.type === 'normal' || this.type === 'fire') {
+                    this.vy += GRAVITY * 0.5;
+                    this.vx *= 0.95; this.vy *= 0.95;
+                } else if (this.type === 'smoke') {
+                    this.vx *= 0.98; this.vy *= 0.98;
+                    this.size += 0.2; // Smoke expands
+                }
                 this.x += this.vx; this.y += this.vy;
                 this.life -= this.decay;
             }
             draw(ctx) {
                 ctx.globalAlpha = Math.max(0, this.life);
                 ctx.fillStyle = this.color;
-                ctx.beginPath(); ctx.arc(this.x, this.y, 2, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
+                ctx.fill();
                 ctx.globalAlpha = 1.0;
+            }
+        }
+
+        function createExplosion(x, y, scale = 1, color = '#ffaa00') {
+            // Flash
+            for(let p = 0; p < 20 * scale; p++) {
+                entities.particles.push(new Particle(x, y, (Math.random()-0.5)*15*scale, (Math.random()-0.5)*15*scale, color, 'fire'));
+                entities.particles.push(new Particle(x, y, (Math.random()-0.5)*20*scale, (Math.random()-0.5)*20*scale, '#ffffff', 'normal'));
+            }
+            // Smoke
+            for(let p = 0; p < 15 * scale; p++) {
+                entities.particles.push(new Particle(x, y, (Math.random()-0.5)*5*scale, (Math.random()-0.5)*5*scale - 2, 'rgba(100,100,100,0.5)', 'smoke'));
+            }
+            // Screen shake effect
+            camera.x += (Math.random() - 0.5) * 20 * scale;
+            camera.y += (Math.random() - 0.5) * 20 * scale;
+        }
+
+        class Target {
+            constructor(type, x, y, vx=0, vy=0) {
+                this.type = type; // 'box', 'missile'
+                this.x = x; this.y = y;
+                this.vx = vx; this.vy = vy;
+                this.r = type === 'box' ? 25 : 10;
+                this.restitution = 0.3;
+                this.color = type === 'box' ? '#e6a14c' : '#ff4444';
+                this.dead = false;
+                this.hits = 0;
+                this.claimedBy = null;
+                this.maxHits = type === 'box' ? 5 : 3;
+            }
+
+            update() {
+                if (draggedObj === this) {
+                    this.x = pointer.worldX; this.y = pointer.worldY;
+                    this.vx = pointer.worldX - lastPointer.worldX;
+                    this.vy = pointer.worldY - lastPointer.worldY;
+                    return;
+                }
+
+                this.vy += GRAVITY;
+                let drag = this.type === 'missile' ? 0.998 : DRAG;
+                this.vx *= drag; this.vy *= drag;
+
+                this.x += this.vx; this.y += this.vy;
+
+                if (this.type === 'missile') {
+                    // Missiles leave smoke
+                    if (Math.random() < 0.5) {
+                        entities.particles.push(new Particle(this.x, this.y, this.vx*-0.1, this.vy*-0.1, 'rgba(200,200,200,0.5)', 'smoke'));
+                    }
+                    // Point towards velocity
+                    this.angle = Math.atan2(this.vy, this.vx);
+                }
+
+                // Floor collision
+                if (this.y + this.r > worldFloorY) {
+                    this.y = worldFloorY - this.r;
+                    if (this.type === 'missile') {
+                        this.dead = true;
+                        createExplosion(this.x, this.y, 1.5, '#ff4444');
+                    } else {
+                        this.vy *= -this.restitution;
+                        this.vx *= 0.95;
+                    }
+                }
+
+                // Radar collision check
+                for (let r of entities.radars) {
+                    if (Math.hypot(this.x - r.x, this.y - r.y) < r.radius + this.r) {
+                        this.dead = true;
+                        r.dead = true;
+                        createExplosion(r.x, r.y, 3, '#55ff77'); // Massive radar explosion
+                    }
+                }
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                if (this.type === 'box') {
+                    ctx.rotate(this.vx * 0.05);
+                    ctx.fillStyle = this.color;
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.rect(-this.r, -this.r, this.r * 2, this.r * 2);
+                    ctx.fill(); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(-this.r, -this.r); ctx.lineTo(this.r, this.r);
+                    ctx.moveTo(this.r, -this.r); ctx.lineTo(-this.r, this.r);
+                    ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.stroke();
+                } else if (this.type === 'missile') {
+                    ctx.rotate(this.angle);
+                    ctx.fillStyle = '#eee';
+                    ctx.beginPath();
+                    ctx.moveTo(15, 0); ctx.lineTo(-10, 5); ctx.lineTo(-10, -5);
+                    ctx.fill();
+                    // Flame
+                    ctx.fillStyle = '#ffaa00';
+                    ctx.beginPath(); ctx.moveTo(-10, 3); ctx.lineTo(-20 - Math.random()*10, 0); ctx.lineTo(-10, -3); ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+
+        class Radar {
+            constructor(x, y) {
+                this.x = x; this.y = y;
+                this.radius = 40;
+                this.angle = 0;
+                this.dead = false;
+            }
+            update() {
+                this.angle += 0.03;
+                if (this.y < worldFloorY) {
+                    this.y += GRAVITY * 10; // Drop to floor
+                    if(this.y > worldFloorY) this.y = worldFloorY;
+                }
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // Base
+                ctx.fillStyle = '#223';
+                ctx.beginPath(); ctx.moveTo(-30, 0); ctx.lineTo(-20, -40); ctx.lineTo(20, -40); ctx.lineTo(30, 0); ctx.fill();
+                
+                // Dish
+                ctx.translate(0, -40);
+                ctx.rotate(this.angle);
+                ctx.fillStyle = 'rgba(60, 255, 120, 0.2)';
+                ctx.strokeStyle = '#55ff77';
+                ctx.lineWidth = 2;
+                
+                ctx.beginPath(); ctx.arc(0, 0, this.radius, Math.PI, Math.PI*2); ctx.fill(); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0, -this.radius); ctx.stroke();
+                
+                ctx.restore();
+            }
+        }
+
+        class MLRS {
+            constructor(x, y) {
+                this.x = x; this.y = y;
+                this.manual = false;
+                this.cooldown = 0;
+                this.angle = -Math.PI / 3;
+            }
+            update() {
+                if (this.y < worldFloorY) {
+                    this.y += GRAVITY * 10;
+                    if(this.y > worldFloorY) this.y = worldFloorY;
+                }
+                if (this.cooldown > 0) this.cooldown--;
+
+                if (!this.manual) {
+                    // Auto Mode
+                    this.angle += Math.sin(Date.now() * 0.001) * 0.01; // Sweep
+                    if (this.cooldown <= 0 && Math.random() < 0.005) {
+                        this.fire(this.angle);
+                        this.cooldown = 150;
+                    }
+                } else {
+                    // Manual Mode Aiming
+                    let targetAngle = Math.atan2(pointer.worldY - (this.y - 30), pointer.worldX - this.x);
+                    // Restrict angle so it doesn't shoot into ground
+                    if (targetAngle > 0) targetAngle = targetAngle > Math.PI/2 ? Math.PI : 0;
+                    this.angle = targetAngle;
+                }
+            }
+            fire(angle) {
+                let speed = 28;
+                let vx = Math.cos(angle) * speed;
+                let vy = Math.sin(angle) * speed;
+                let m = new Target('missile', this.x + Math.cos(angle)*30, this.y - 30 + Math.sin(angle)*30, vx, vy);
+                entities.targets.push(m);
+                createExplosion(this.x + Math.cos(angle)*30, this.y - 30 + Math.sin(angle)*30, 0.5, '#fff');
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // Chassis
+                ctx.fillStyle = '#343'; ctx.fillRect(-40, -20, 80, 20);
+                ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(-25, 0, 10, 0, Math.PI*2); ctx.arc(25, 0, 10, 0, Math.PI*2); ctx.fill();
+                
+                // Launcher
+                ctx.translate(0, -20);
+                ctx.rotate(this.angle);
+                ctx.fillStyle = '#454';
+                ctx.fillRect(0, -10, 40, 20);
+                
+                ctx.restore();
+
+                // Draw Mode UI
+                ctx.save();
+                ctx.translate(this.x, this.y - 50);
+                ctx.textAlign = 'center'; ctx.font = '12px Inter';
+                ctx.fillStyle = this.manual ? '#55aaff' : '#aaa';
+                ctx.fillText(this.manual ? "MANUAL" : "AUTO", 0, 0);
+                ctx.restore();
+
+                // Draw Trajectory Projection in Manual mode
+                if (this.manual) {
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.setLineDash([10, 10]);
+                    ctx.strokeStyle = 'rgba(85, 170, 255, 0.6)';
+                    ctx.lineWidth = 2;
+                    let simX = this.x; let simY = this.y - 30;
+                    let simVx = Math.cos(this.angle) * 28;
+                    let simVy = Math.sin(this.angle) * 28;
+                    ctx.moveTo(simX, simY);
+                    for(let i=0; i<80; i++) {
+                        simVy += GRAVITY;
+                        simVx *= 0.998; simVy *= 0.998;
+                        simX += simVx; simY += simVy;
+                        ctx.lineTo(simX, simY);
+                        if (simY > worldFloorY) break;
+                    }
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }
+        }
+
+        class CRAM {
+            constructor(x, y) {
+                this.x = x; this.y = y;
+                this.vy = 0;
+                this.nn = new MLP(4, 8, 1);
+                this.cooldown = 0;
+                this.target = null;
+                this.aimAngle = -Math.PI / 2;
+                
+                this.shotsFired = 0;
+                this.shotsHit = 0;
+                this.trainCount = 0;
+            }
+
+            update() {
+                if (this.y < worldFloorY) {
+                    this.vy += GRAVITY; this.y += this.vy;
+                    if (this.y > worldFloorY) { this.y = worldFloorY; this.vy = 0; }
+                }
+                if (this.cooldown > 0) this.cooldown--;
+
+                // PRIORITY TARGETING ALGORITHM
+                let bestTarget = null;
+                let highestScore = -Infinity;
+
+                for (let t of entities.targets) {
+                    if (t.y > worldFloorY - t.r - 10) continue; // Ignore grounded
+                    if (draggedObj === t) continue;
+                    if (t.claimedBy && t.claimedBy !== this) continue; // Exclusive targeting
+
+                    let distToCram = Math.hypot(t.x - this.x, t.y - this.y);
+                    if (distToCram > 1800) continue; // Max Range
+
+                    // Predict Target Impact X (Kinematic projection)
+                    let a = 0.5 * GRAVITY;
+                    let b = t.vy;
+                    let c = -(worldFloorY - t.y);
+                    let disc = b*b - 4*a*c;
+                    let impactX = t.x;
+                    
+                    if(disc >= 0) {
+                        let t1 = (-b + Math.sqrt(disc)) / (2*a);
+                        let t2 = (-b - Math.sqrt(disc)) / (2*a);
+                        let timeToImpact = Math.max(t1, t2);
+                        impactX = t.x + t.vx * timeToImpact;
+                    }
+
+                    let score = -distToCram; // Base score prefers closer targets
+                    
+                    // Defend Radars Priority
+                    for (let r of entities.radars) {
+                        if (Math.abs(impactX - r.x) < r.radius + 150) {
+                            score += 10000; // MASSIVE PRIORITY
+                            break;
+                        }
+                    }
+
+                    if (score > highestScore) {
+                        highestScore = score;
+                        bestTarget = t;
+                    }
+                }
+
+                if (this.target && this.target !== bestTarget && this.target.claimedBy === this) {
+                    this.target.claimedBy = null; // Release old target
+                }
+                this.target = bestTarget;
+                if (this.target) this.target.claimedBy = this;
+
+                if (this.target) {
+                    let dx = this.target.x - this.x;
+                    let dy = this.target.y - this.y;
+                    
+                    // Normalize for NN
+                    let inputs = [ dx / 1500, dy / 1500, this.target.vx / 30, this.target.vy / 30 ];
+                    
+                    let nnOutput = this.nn.forward(inputs);
+                    let offsetAngle = Math.max(-1.5, Math.min(1.5, nnOutput[0]));
+
+                    let baseAngle = Math.atan2(dy, dx);
+                    let targetAimAngle = baseAngle + offsetAngle;
+                    
+                    let angleDiff = targetAimAngle - this.aimAngle;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                    
+                    this.aimAngle += angleDiff * 0.4;
+
+                    if (this.cooldown <= 0 && Math.abs(angleDiff) < 0.2) {
+                        this.fire(inputs, offsetAngle, baseAngle);
+                    }
+                } else {
+                    let angleDiff = -Math.PI / 2 - this.aimAngle;
+                    this.aimAngle += angleDiff * 0.05;
+                }
+            }
+
+            fire(inputs, predictedOffset, baseAngle) {
+                this.cooldown = 3;
+                this.shotsFired++;
+                
+                let bSpeed = 35;
+                let bx = Math.cos(this.aimAngle) * bSpeed;
+                let by = Math.sin(this.aimAngle) * bSpeed;
+
+                let tipX = this.x + Math.cos(this.aimAngle) * 30;
+                let tipY = this.y - 15 + Math.sin(this.aimAngle) * 30;
+
+                entities.bullets.push({
+                    x: tipX, y: tipY, vx: bx, vy: by,
+                    parent: this, target: this.target,
+                    inputs: inputs, predictedOffset: predictedOffset, baseAngle: baseAngle,
+                    active: true, minDist: Infinity, evaluated: false
+                });
+
+                for(let i=0; i<2; i++) entities.particles.push(new Particle(tipX, tipY, bx*0.2+(Math.random()-0.5)*2, by*0.2+(Math.random()-0.5)*2, '#ffaa00'));
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                ctx.fillStyle = '#222'; ctx.strokeStyle = '#444'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(-30, 0); ctx.lineTo(-20, -15); ctx.lineTo(20, -15); ctx.lineTo(30, 0); ctx.closePath();
+                ctx.fill(); ctx.stroke();
+                
+                ctx.translate(0, -15);
+                ctx.rotate(this.aimAngle);
+                
+                ctx.fillStyle = '#111'; ctx.fillRect(10, -4, 35, 8);
+                ctx.fillStyle = '#ddd'; ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+                ctx.restore();
+
+                ctx.save();
+                ctx.translate(this.x, this.y - 45);
+                ctx.textAlign = 'center'; ctx.font = '10px Inter';
+                
+                let acc = this.shotsFired > 0 ? ((this.shotsHit / this.shotsFired) * 100).toFixed(1) : "0.0";
+                ctx.fillStyle = '#00ffaa'; ctx.fillText(`HIT: ${acc}%`, 0, 0);
+                ctx.fillStyle = '#ffaa00'; ctx.fillText(`GEN: ${this.trainCount}`, 0, 12);
+                
+                // Show if locked
+                if(this.target) {
+                    ctx.fillStyle = '#ff5555'; ctx.fillText(`[LOCKED]`, 0, -12);
+                }
+                ctx.restore();
             }
         }
 
         // --- MAIN LOOP ---
 
         function update() {
-            // Update pointers
-            if (pointer.isDown && draggedObj) {
-                pointer.vx = pointer.x - lastPointer.x;
-                pointer.vy = pointer.y - lastPointer.y;
+            // Camera Panning Keys
+            let panSpeed = 15;
+            if (keys['w'] || keys['ArrowUp']) camera.y -= panSpeed;
+            if (keys['s'] || keys['ArrowDown']) camera.y += panSpeed;
+            if (keys['a'] || keys['ArrowLeft']) camera.x -= panSpeed;
+            if (keys['d'] || keys['ArrowRight']) camera.x += panSpeed;
+
+            // Camera Panning Mouse
+            if (pointer.isPanning) {
+                camera.x -= pointer.screenX - lastPointer.screenX;
+                camera.y -= pointer.screenY - lastPointer.screenY;
             }
-            lastPointer.x = pointer.x;
-            lastPointer.y = pointer.y;
+
+            // Screen/World translation for pointer
+            pointer.worldX = pointer.screenX + camera.x;
+            pointer.worldY = pointer.screenY + camera.y;
+
+            if (pointer.isDown && draggedObj) {
+                pointer.vx = pointer.worldX - lastPointer.worldX;
+                pointer.vy = pointer.worldY - lastPointer.worldY;
+            }
+
+            lastPointer.screenX = pointer.screenX;
+            lastPointer.screenY = pointer.screenY;
+            lastPointer.worldX = pointer.worldX;
+            lastPointer.worldY = pointer.worldY;
 
             // Update Entities
-            targets.forEach(t => t.update());
-            crams.forEach(c => c.update());
-            particles.forEach(p => p.update());
-            particles = particles.filter(p => p.life > 0);
+            entities.radars.forEach(r => r.update());
+            entities.mlrs.forEach(m => m.update());
+            entities.crams.forEach(c => c.update());
+            entities.targets.forEach(t => t.update());
+            entities.particles.forEach(p => p.update());
+            entities.particles = entities.particles.filter(p => p.life > 0);
 
-            // Update Bullets & Neural Network Training
-            for (let i = bullets.length - 1; i >= 0; i--) {
-                let b = bullets[i];
+            // Update Bullets & NN Training
+            for (let i = entities.bullets.length - 1; i >= 0; i--) {
+                let b = entities.bullets[i];
                 if (!b.active) continue;
 
-                b.x += b.vx;
-                b.y += b.vy;
+                b.x += b.vx; b.y += b.vy;
 
                 let t = b.target;
-                if (!t || t.dead) {
-                    b.active = false; 
-                    continue;
-                }
+                if (!t || t.dead) { b.active = false; continue; }
 
                 let dist = Math.hypot(b.x - t.x, b.y - t.y);
 
-                // Collision Detection
-                if (dist < t.r + 2) {
-                    // HIT!
-                    b.parent.shotsHit++;
-                    b.parent.trainCount++;
+                // Hit Detection
+                if (dist < t.r + 5) {
+                    b.parent.shotsHit++; b.parent.trainCount++;
                     b.active = false;
+                    b.parent.nn.train([b.predictedOffset]); // Perfect hit, enforce choice
                     
-                    // Train NN to enforce this good action (Loss = 0)
-                    b.parent.nn.train([b.predictedOffset]);
-                    
-                    // Physical impact
-                    t.vx += b.vx * 0.1;
-                    t.vy += b.vy * 0.1;
-                    
+                    t.vx += b.vx * 0.05; t.vy += b.vy * 0.05;
                     t.hits++;
-                    if (t.hits >= 5) {
+                    
+                    if (t.hits >= t.maxHits) {
                         t.dead = true;
-                        // Massive explosion
-                        for(let p = 0; p < 30; p++) {
-                            particles.push(new Particle(t.x, t.y, (Math.random()-0.5)*15, (Math.random()-0.5)*15, t.color));
-                            particles.push(new Particle(t.x, t.y, (Math.random()-0.5)*10, (Math.random()-0.5)*10, '#ffffff'));
-                            particles.push(new Particle(t.x, t.y, (Math.random()-0.5)*8, (Math.random()-0.5)*8, '#ff5555'));
-                        }
+                        createExplosion(t.x, t.y, t.type === 'missile' ? 1.5 : 2, t.color);
                     } else {
-                        // Small sparkles for normal hits
-                        for(let p = 0; p < 5; p++) particles.push(new Particle(b.x, b.y, (Math.random()-0.5)*5, (Math.random()-0.5)*5, '#ff5555'));
+                        for(let p = 0; p < 5; p++) entities.particles.push(new Particle(b.x, b.y, (Math.random()-0.5)*5, (Math.random()-0.5)*5, '#ff5555'));
                     }
                     continue;
                 }
 
-                // AI Training Evaluation (The magic happens here)
+                // AI Evaluation (Closest Approach)
                 if (!b.evaluated) {
                     if (dist < b.minDist) {
                         b.minDist = dist;
-                        // Record target position at closest approach
-                        b.closestTx = t.x;
-                        b.closestTy = t.y;
-                    } else if (dist > b.minDist + 1) {
-                        // Distance is increasing -> Bullet has passed the target! (Closest approach reached)
+                        b.closestTx = t.x; b.closestTy = t.y;
+                    } else if (dist > b.minDist + 2) { // Passed the target
                         b.evaluated = true;
-                        
-                        // Calculate the ideal angle that WOULD have hit the target at that moment
                         let idealAngle = Math.atan2(b.closestTy - b.parent.y, b.closestTx - b.parent.x);
-                        
-                        // Calculate ideal offset relative to original base angle
                         let idealOffset = idealAngle - b.baseAngle;
                         
-                        // Normalize angle diff to -PI to PI
                         while (idealOffset > Math.PI) idealOffset -= Math.PI * 2;
                         while (idealOffset < -Math.PI) idealOffset += Math.PI * 2;
 
-                        // TRAIN THE NETWORK!
                         b.parent.nn.train([idealOffset]);
                         b.parent.trainCount++;
                     }
                 }
 
-                // Remove offscreen
-                if (b.x < 0 || b.x > width || b.y < 0 || b.y > height) {
-                    b.active = false;
-                }
+                // Remove far offscreen bounds (relative to active area)
+                if (Math.abs(b.x - b.parent.x) > 3000 || b.y < -2000 || b.y > worldFloorY + 200) b.active = false;
             }
             
-            // Clean up dead objects
-            bullets = bullets.filter(b => b.active);
-            targets = targets.filter(t => {
-                if (t.dead && draggedObj === t) {
-                    draggedObj = null;
-                    pointer.isDown = false;
-                }
+            entities.bullets = entities.bullets.filter(b => b.active);
+            entities.targets = entities.targets.filter(t => {
+                if (t.dead && draggedObj === t) { draggedObj = null; pointer.isDown = false; }
                 return !t.dead;
             });
+            entities.radars = entities.radars.filter(r => !r.dead);
         }
 
         function draw() {
             ctx.clearRect(0, 0, width, height);
 
-            // Draw Background Gradients / Atmosphere
+            // Draw Sky (Fixed to screen)
             let grad = ctx.createLinearGradient(0, 0, 0, height);
-            grad.addColorStop(0, '#0b0c10');
-            grad.addColorStop(1, '#1f2833');
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, width, height);
+            grad.addColorStop(0, '#0b0c10'); grad.addColorStop(1, '#1f2833');
+            ctx.fillStyle = grad; ctx.fillRect(0, 0, width, height);
 
-            // Draw Floor
-            ctx.fillStyle = '#111';
-            ctx.fillRect(0, floorY, width, height - floorY);
-            ctx.strokeStyle = '#333';
-            ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.moveTo(0, floorY); ctx.lineTo(width, floorY); ctx.stroke();
-
-            // Draw Targets & CRAMs
-            targets.forEach(t => t.draw(ctx));
-            crams.forEach(c => c.draw(ctx));
-
-            // Draw Neon Bullets (Red Tracers)
             ctx.save();
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = "#ff0000";
-            ctx.strokeStyle = "#ff4444";
-            ctx.lineCap = "round";
-            ctx.lineWidth = 3;
+            ctx.translate(-camera.x, -camera.y);
+
+            // Draw World Floor
+            ctx.fillStyle = '#111';
+            // Draw floor infinitely by spanning across current camera view heavily padded
+            ctx.fillRect(camera.x - 2000, worldFloorY, width + 4000, 2000);
             
+            // Grid lines on floor for perspective
+            ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+            let startX = Math.floor(camera.x / 100) * 100 - 100;
+            for(let x = startX; x < camera.x + width + 200; x += 100) {
+                ctx.beginPath(); ctx.moveTo(x, worldFloorY); ctx.lineTo(x, worldFloorY + 2000); ctx.stroke();
+            }
+            
+            // Floor highlight edge
+            ctx.strokeStyle = '#444'; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.moveTo(camera.x - 2000, worldFloorY); ctx.lineTo(camera.x + width + 2000, worldFloorY); ctx.stroke();
+
+            // Draw Entities
+            entities.radars.forEach(r => r.draw(ctx));
+            entities.mlrs.forEach(m => m.draw(ctx));
+            entities.targets.forEach(t => t.draw(ctx));
+            entities.crams.forEach(c => c.draw(ctx));
+            entities.particles.forEach(p => p.draw(ctx));
+
+            // Neon Tracers
+            ctx.save();
+            ctx.shadowBlur = 12; ctx.shadowColor = "#ff0000";
+            ctx.strokeStyle = "#ff5555"; ctx.lineCap = "round"; ctx.lineWidth = 4;
             ctx.beginPath();
-            for (let b of bullets) {
+            for (let b of entities.bullets) {
                 ctx.moveTo(b.x, b.y);
-                // Draw tracer tail based on velocity
-                ctx.lineTo(b.x - b.vx * 0.8, b.y - b.vy * 0.8);
+                ctx.lineTo(b.x - b.vx * 1.5, b.y - b.vy * 1.5);
             }
             ctx.stroke();
             ctx.restore();
 
-            // Draw Particles
-            particles.forEach(p => p.draw(ctx));
-
+            ctx.restore(); // End World Space
             requestAnimationFrame(gameLoop);
         }
 
         function gameLoop() {
-            update();
-            draw();
+            update(); draw();
         }
 
-        // --- INPUT HANDLING ---
+        // --- INPUT BINDINGS ---
 
-        function getMousePos(e) {
-            if(e.touches) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-            return { x: e.clientX, y: e.clientY };
-        }
+        function handlePointerDown(e) {
+            let isTouch = e.touches !== undefined;
+            pointer.screenX = isTouch ? e.touches[0].clientX : e.clientX;
+            pointer.screenY = isTouch ? e.touches[0].clientY : e.clientY;
+            pointer.worldX = pointer.screenX + camera.x;
+            pointer.worldY = pointer.screenY + camera.y;
+            pointer.btn = e.button;
 
-        function pointerDown(e) {
-            let pos = getMousePos(e);
-            pointer.x = pos.x; pointer.y = pos.y;
+            if (e.button === 1 || e.button === 2) {
+                pointer.isPanning = true;
+                return;
+            }
+
             pointer.isDown = true;
-            
-            // Check for drag
-            for (let t of targets) {
-                if (Math.hypot(t.x - pointer.x, t.y - pointer.y) < t.r * 1.5) {
-                    draggedObj = t;
-                    t.vx = 0; t.vy = 0;
+            let interacted = false;
+
+            // 1. Check MLRS toggle
+            for (let m of entities.mlrs) {
+                if (Math.abs(pointer.worldX - m.x) < 50 && Math.abs(pointer.worldY - (m.y-20)) < 40) {
+                    m.manual = !m.manual;
+                    interacted = true;
                     break;
+                }
+            }
+
+            // 2. Check Target Drag
+            if (!interacted) {
+                for (let t of entities.targets) {
+                    if (t.type === 'box' && Math.hypot(t.x - pointer.worldX, t.y - pointer.worldY) < t.r * 1.5) {
+                        draggedObj = t; t.vx = 0; t.vy = 0;
+                        interacted = true;
+                        break;
+                    }
+                }
+            }
+
+            // 3. Fire active manual MLRS
+            if (!interacted && e.button === 0) {
+                let activeMLRS = entities.mlrs.find(m => m.manual);
+                if (activeMLRS && activeMLRS.cooldown <= 0) {
+                    activeMLRS.fire(activeMLRS.angle);
+                    activeMLRS.cooldown = 30; // Shorter manual cooldown
                 }
             }
         }
 
-        function pointerMove(e) {
-            let pos = getMousePos(e);
-            pointer.x = pos.x; pointer.y = pos.y;
+        function handlePointerMove(e) {
+            let isTouch = e.touches !== undefined;
+            pointer.screenX = isTouch ? e.touches[0].clientX : e.clientX;
+            pointer.screenY = isTouch ? e.touches[0].clientY : e.clientY;
         }
 
-        function pointerUp(e) {
-            pointer.isDown = false;
-            if (draggedObj) {
-                // Apply final velocity from throw
-                draggedObj.vx = pointer.vx;
-                draggedObj.vy = pointer.vy;
-                draggedObj = null;
+        function handlePointerUp(e) {
+            if (e.button === 1 || e.button === 2) { pointer.isPanning = false; }
+            if (e.button === 0) {
+                pointer.isDown = false;
+                if (draggedObj) {
+                    draggedObj.vx = pointer.vx; draggedObj.vy = pointer.vy;
+                    draggedObj = null;
+                }
             }
+            if (e.touches && e.touches.length === 0) { pointer.isDown = false; pointer.isPanning = false; if(draggedObj){draggedObj.vx=pointer.vx;draggedObj.vy=pointer.vy;draggedObj=null;} }
         }
 
-        canvas.addEventListener('mousedown', pointerDown);
-        canvas.addEventListener('mousemove', pointerMove);
-        window.addEventListener('mouseup', pointerUp);
+        canvas.addEventListener('mousedown', handlePointerDown);
+        canvas.addEventListener('mousemove', handlePointerMove);
+        window.addEventListener('mouseup', handlePointerUp);
         
-        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); pointerDown(e); }, {passive: false});
-        canvas.addEventListener('touchmove', (e) => { e.preventDefault(); pointerMove(e); }, {passive: false});
-        window.addEventListener('touchend', pointerUp);
+        canvas.addEventListener('touchstart', (e) => { if(e.target === canvas) e.preventDefault(); handlePointerDown(e); }, {passive: false});
+        canvas.addEventListener('touchmove', (e) => { if(e.target === canvas) e.preventDefault(); handlePointerMove(e); }, {passive: false});
+        window.addEventListener('touchend', handlePointerUp);
 
-        // --- UI BINDINGS ---
+        window.addEventListener('keydown', e => keys[e.key] = true);
+        window.addEventListener('keyup', e => keys[e.key] = false);
+
+        // --- UI BUTTONS ---
+        // Spawns items precisely in the center of the current camera view
         
-        document.getElementById('btn-ball').addEventListener('click', () => {
-            targets.push(new Target('ball', width/2 + (Math.random()-0.5)*100, 100));
+        document.getElementById('btn-box').addEventListener('click', () => {
+            entities.targets.push(new Target('box', camera.x + width/2 + (Math.random()-0.5)*200, camera.y + 100));
         });
         
-        document.getElementById('btn-crate').addEventListener('click', () => {
-            targets.push(new Target('crate', width/2 + (Math.random()-0.5)*100, 100));
-        });
-
         document.getElementById('btn-cram').addEventListener('click', () => {
-            if (crams.length < 5) {
-                crams.push(new CRAM(width/2 + (Math.random()-0.5)*400, -50));
-            }
+            entities.crams.push(new CRAM(camera.x + width/2, camera.y - 100));
+        });
+
+        document.getElementById('btn-radar').addEventListener('click', () => {
+            entities.radars.push(new Radar(camera.x + width/2, camera.y - 100));
+        });
+
+        document.getElementById('btn-mlrs').addEventListener('click', () => {
+            entities.mlrs.push(new MLRS(camera.x + width/2, camera.y - 100));
         });
 
         document.getElementById('btn-clear').addEventListener('click', () => {
-            targets = [];
-            bullets = [];
+            entities.targets = []; entities.bullets = []; entities.crams = []; entities.radars = []; entities.mlrs = []; entities.particles = [];
         });
 
-        // Initialize setup
-        crams.push(new CRAM(width/2, floorY));
-        targets.push(new Target('ball', width/2 - 200, 200));
+        // Setup Initial Scene
+        entities.radars.push(new Radar(0, worldFloorY));
+        entities.crams.push(new CRAM(-300, worldFloorY));
+        entities.crams.push(new CRAM(300, worldFloorY));
+        entities.mlrs.push(new MLRS(800, worldFloorY));
 
-        // Start loop
+        // Start Loop
         requestAnimationFrame(gameLoop);
 
     </script>
