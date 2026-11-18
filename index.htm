@@ -3,1167 +3,627 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>train</title>
+    <title>C-RAM AI Sandbox</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Matter.js Physics Engine -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #0f172a; /* Tailwind slate-900 */
-            color: white;
-            font-family: 'Inter', sans-serif;
-        }
-        #canvas-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 1;
-        }
-        #ui-layer {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 10;
-            pointer-events: none; /* Let clicks pass through to UI elements */
-            overflow: hidden; /* Keep dragged panels inside */
-        }
-        .panel {
-            position: absolute;
-            background: rgba(15, 23, 42, 0.4); /* Glassmorphic darker slate */
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 1rem;
-            pointer-events: auto; /* Enable clicks on the panels */
-            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
-            display: flex;
-            flex-direction: column;
-            transition: height 0.3s ease, opacity 0.3s ease;
-        }
-        .panel-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 0.75rem 1rem;
-            cursor: grab;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            user-select: none;
-        }
-        .panel-header:active {
-            cursor: grabbing;
-        }
-        .panel-content {
-            padding: 1rem;
-            overflow-y: auto;
-            max-height: calc(80vh - 50px);
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-            transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
-        }
-        .panel.minimized .panel-content {
-            max-height: 0;
-            padding-top: 0;
-            padding-bottom: 0;
-            opacity: 0;
-            overflow: hidden;
-        }
-        .window-controls button {
-            background: none;
-            border: none;
-            color: #94a3b8;
-            cursor: pointer;
-            padding: 0.25rem;
-            border-radius: 50%;
-            transition: color 0.2s, background 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 24px;
-            height: 24px;
-        }
-        .window-controls button:hover {
-            color: white;
-            background: rgba(255, 255, 255, 0.1);
-        }
-        
-        #restore-ui-btn {
-            position: absolute;
-            bottom: 20px;
-            right: 20px;
+        body { margin: 0; overflow: hidden; background: #0b0c10; color: white; font-family: 'Inter', sans-serif; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        .ui-layer { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; padding: 1rem; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+        .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
+        .btn { 
+            background: rgba(255, 255, 255, 0.05); 
+            border: 1px solid rgba(255, 255, 255, 0.1); 
+            padding: 10px 20px; 
+            border-radius: 8px; 
+            backdrop-filter: blur(8px); 
+            cursor: pointer; 
             pointer-events: auto;
-            display: none;
-            z-index: 20;
+            color: #ccc;
+            font-weight: 500;
+            transition: all 0.2s;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
-        #recenter-camera-btn {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            pointer-events: auto;
-            display: none;
-            z-index: 20;
-        }
-        
-        /* Custom scrollbar for webkit */
-        ::-webkit-scrollbar {
-            width: 6px;
-        }
-        ::-webkit-scrollbar-track {
-            background: rgba(0,0,0,0.1); 
-        }
-        ::-webkit-scrollbar-thumb {
-            background: rgba(255,255,255,0.2); 
-            border-radius: 10px;
-        }
+        .btn:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.3); color: #fff; }
+        .btn:active { transform: scale(0.95); }
+        .btn-cram { border-color: rgba(255, 60, 60, 0.4); color: #ff7777; background: rgba(255, 0, 0, 0.05); }
+        .btn-cram:hover { background: rgba(255, 60, 60, 0.2); border-color: #ff5555; color: #fff; box-shadow: 0 0 15px rgba(255, 0, 0, 0.4); }
+        .instructions { background: rgba(0, 0, 0, 0.6); padding: 10px 20px; border-radius: 8px; font-size: 0.85rem; color: #aaa; text-align: center; max-width: 600px; border: 1px solid rgba(255,255,255,0.05); }
+        .highlight { color: #ff5555; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <!-- Physics Canvas -->
-    <div id="canvas-container"></div>
-
-    <!-- UI Overlay -->
-    <div id="ui-layer">
-        
-        <!-- Stats Panel (Left) -->
-        <div class="panel w-64" id="panel-stats" style="top: 20px; left: 20px;">
-            <div class="panel-header drag-handle">
-                <span class="font-bold text-sm text-white tracking-wider uppercase">Evolution Stats</span>
-                <div class="window-controls flex gap-1">
-                    <button class="minimize-btn" title="Minimize">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                    </button>
-                    <button class="close-btn" title="Close">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                    </button>
-                </div>
-            </div>
-            <div class="panel-content">
-                <div class="flex flex-col gap-1 text-sm text-slate-300">
-                    <div class="flex justify-between">
-                        <span>Generation:</span>
-                        <span id="stat-gen" class="font-bold text-white">1</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span>Alive:</span>
-                        <span id="stat-alive" class="font-bold text-white">0 / 0</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span>Time Left:</span>
-                        <span id="stat-time" class="font-bold text-white">0s</span>
-                    </div>
-                    <div class="flex justify-between mt-2 pt-2 border-t border-slate-600">
-                        <span>Best Fitness:</span>
-                        <span id="stat-best-fit" class="font-bold text-teal-400">0.0</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span>Best Distance:</span>
-                        <span id="stat-best-dist" class="font-bold text-teal-400">0m</span>
-                    </div>
-                </div>
-
-                <div class="text-xs text-slate-400 mt-2 leading-relaxed">
-                    <strong>Goal:</strong> The AI learns to control its 8 joints using Neuroevolution. It is rewarded for moving forward and keeping its torso upright. It dies if its torso hits the ground.
-                </div>
-            </div>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div class="ui-layer">
+        <div class="controls">
+            <button class="btn" id="btn-ball">Spawn Ball</button>
+            <button class="btn" id="btn-crate">Spawn Crate</button>
+            <button class="btn btn-cram" id="btn-cram">Deploy C-RAM</button>
+            <button class="btn" id="btn-clear">Clear Targets</button>
         </div>
-
-        <!-- Controls Panel (Right) -->
-        <div class="panel w-72" id="panel-controls" style="top: 20px; right: 20px;">
-            <div class="panel-header drag-handle">
-                <span class="font-bold text-sm text-white tracking-wider uppercase">Simulation Controls</span>
-                <div class="window-controls flex gap-1">
-                    <button class="minimize-btn" title="Minimize">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                    </button>
-                    <button class="close-btn" title="Close">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                    </button>
-                </div>
-            </div>
-            <div class="panel-content">
-                <!-- Speed Control -->
-                <div class="flex flex-col gap-2">
-                    <label for="speed-slider" class="text-sm font-medium flex justify-between text-slate-200">
-                        Simulation Speed <span id="speed-val" class="text-blue-400">1x</span>
-                    </label>
-                    <input type="range" id="speed-slider" min="1" max="10" value="2" class="w-full cursor-pointer accent-blue-500">
-                </div>
-
-                <!-- Training Mode -->
-                <div class="flex flex-col gap-2">
-                    <label for="mode-select" class="text-sm font-medium text-slate-200">Training Mode</label>
-                    <select id="mode-select" class="w-full bg-slate-800/80 text-white rounded px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer border border-slate-600 backdrop-blur-md">
-                        <option value="walk">Walk / Run</option>
-                        <option value="jump">Jump Over Boxes</option>
-                    </select>
-                </div>
-
-                <!-- Map Selector -->
-                <div class="flex flex-col gap-2">
-                    <label for="map-select" class="text-sm font-medium text-slate-200">Environment Map</label>
-                    <select id="map-select" class="w-full bg-slate-800/80 text-white rounded px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer border border-slate-600 backdrop-blur-md">
-                        <option value="flat">Flat Concrete</option>
-                        <option value="boxes">Flat with Boxes</option>
-                        <option value="hills">Hills / Uneven</option>
-                    </select>
-                </div>
-
-                <!-- Population Size -->
-                <div class="flex flex-col gap-2">
-                    <label for="pop-slider" class="text-sm font-medium flex justify-between text-slate-200">
-                        Population <span id="pop-val" class="text-blue-400">30</span>
-                    </label>
-                    <input type="range" id="pop-slider" min="10" max="150" value="30" step="10" class="w-full cursor-pointer accent-blue-500">
-                </div>
-
-                <!-- Render Optimization -->
-                <div class="flex items-center gap-2 mt-1">
-                    <input type="checkbox" id="render-best-toggle" class="cursor-pointer w-4 h-4 accent-blue-500">
-                    <label for="render-best-toggle" class="text-sm font-medium text-slate-200 cursor-pointer">Only Draw Best Bot</label>
-                </div>
-
-                <div class="flex flex-col gap-2 mt-2">
-                    <button id="btn-reset" class="bg-blue-600/80 hover:bg-blue-500 text-white py-2 rounded-lg text-sm font-bold transition shadow-lg backdrop-blur-md border border-blue-500/50">
-                        Restart Evolution
-                    </button>
-                    <button id="btn-kill" class="bg-red-500/80 hover:bg-red-400 text-white py-2 rounded-lg text-sm font-bold transition shadow-lg backdrop-blur-md border border-red-500/50">
-                        Kill All (Next Gen)
-                    </button>
-                </div>
-            </div>
+        <div class="instructions">
+            Drag and throw objects. C-RAM uses a <span class="highlight">Neural Network</span> to predict parabolic trajectories. 
+            It learns from its misses by backpropagating the angular error at the closest approach point!
         </div>
-
-        <button id="restore-ui-btn" class="bg-slate-700/80 hover:bg-slate-600 text-white py-2 px-4 rounded-full text-sm font-bold transition shadow-lg backdrop-blur-md border border-slate-500 flex items-center gap-2">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14h6v6H4zm10 0h6v6h-6zM4 4h6v6H4zm10 0h6v6h-6z"/></svg>
-            Restore UI Panels
-        </button>
-
-        <button id="recenter-camera-btn" class="bg-indigo-600/80 hover:bg-indigo-500 text-white py-2 px-6 rounded-full text-sm font-bold transition shadow-lg backdrop-blur-md border border-indigo-400 flex items-center gap-2">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
-            Recenter Camera
-        </button>
-
     </div>
 
-    <!-- Application Logic -->
     <script>
-        // --- 1. NEURAL NETWORK IMPLEMENTATION ---
-        // A simple Feed-Forward Neural Network for Neuroevolution
-        class NeuralNetwork {
-            constructor(inputNodes, hiddenNodes, outputNodes) {
-                this.inputNodes = inputNodes;
-                this.hiddenNodes = hiddenNodes;
-                this.outputNodes = outputNodes;
-
-                // Weights and biases arrays
-                this.weightsIH = this.randomMatrix(this.hiddenNodes, this.inputNodes);
-                this.weightsHO = this.randomMatrix(this.outputNodes, this.hiddenNodes);
-                this.biasH = this.randomMatrix(this.hiddenNodes, 1);
-                this.biasO = this.randomMatrix(this.outputNodes, 1);
+        // --- CUSTOM NEURAL NETWORK (MLP) ---
+        // A lightweight Multilayer Perceptron to learn intercept angles.
+        class MLP {
+            constructor(ni, nh, no, lr = 0.02) {
+                this.ni = ni; this.nh = nh; this.no = no; this.lr = lr;
+                // Initialize weights with small random values
+                this.w1 = Array.from({length: ni * nh}, () => (Math.random() - 0.5) * 0.5);
+                this.b1 = Array.from({length: nh}, () => (Math.random() - 0.5) * 0.5);
+                this.w2 = Array.from({length: nh * no}, () => (Math.random() - 0.5) * 0.5);
+                this.b2 = Array.from({length: no}, () => (Math.random() - 0.5) * 0.5);
             }
 
-            randomMatrix(rows, cols) {
-                let matrix = [];
-                for (let i = 0; i < rows; i++) {
-                    matrix[i] = [];
-                    for (let j = 0; j < cols; j++) {
-                        matrix[i][j] = (Math.random() * 2) - 1; // -1 to 1
+            forward(inp) {
+                this.inp = inp;
+                this.h = new Array(this.nh);
+                for(let i = 0; i < this.nh; i++) {
+                    let sum = this.b1[i];
+                    for(let j = 0; j < this.ni; j++) {
+                        sum += inp[j] * this.w1[i * this.ni + j];
                     }
+                    this.h[i] = Math.tanh(sum); // Tanh activation for hidden layer
                 }
-                return matrix;
-            }
-
-            // Activation function (Tanh for ranges between -1 and 1)
-            tanh(x) {
-                return Math.tanh(x);
-            }
-
-            predict(inputs) {
-                // Highly optimized inline prediction to prevent Garbage Collection lag
-                // We pre-allocate these arrays so we reuse them instead of creating new ones
-                if (!this.hiddenOut) this.hiddenOut = new Array(this.hiddenNodes);
-                if (!this.finalOut) this.finalOut = new Array(this.outputNodes);
-
-                // Input to Hidden Layer
-                for (let i = 0; i < this.hiddenNodes; i++) {
-                    let sum = this.biasH[i][0];
-                    for (let j = 0; j < this.inputNodes; j++) {
-                        sum += this.weightsIH[i][j] * inputs[j];
+                this.out = new Array(this.no);
+                for(let i = 0; i < this.no; i++) {
+                    let sum = this.b2[i];
+                    for(let j = 0; j < this.nh; j++) {
+                        sum += this.h[j] * this.w2[i * this.nh + j];
                     }
-                    this.hiddenOut[i] = Math.tanh(sum);
+                    this.out[i] = sum; // Linear output
+                }
+                return this.out;
+            }
+
+            train(target) {
+                // Calculate output error (MSE derivative)
+                let dOut = new Array(this.no);
+                for(let i = 0; i < this.no; i++) {
+                    dOut[i] = target[i] - this.out[i];
                 }
 
-                // Hidden to Output Layer
-                for (let i = 0; i < this.outputNodes; i++) {
-                    let sum = this.biasO[i][0];
-                    for (let j = 0; j < this.hiddenNodes; j++) {
-                        sum += this.weightsHO[i][j] * this.hiddenOut[j];
+                // Backpropagate to hidden layer
+                let dH = new Array(this.nh).fill(0);
+                for(let i = 0; i < this.no; i++) {
+                    for(let j = 0; j < this.nh; j++) {
+                        dH[j] += dOut[i] * this.w2[i * this.nh + j];
+                        // Update w2
+                        this.w2[i * this.nh + j] += this.lr * dOut[i] * this.h[j];
                     }
-                    this.finalOut[i] = Math.tanh(sum);
+                    // Update b2
+                    this.b2[i] += this.lr * dOut[i];
                 }
 
-                return this.finalOut;
-            }
-
-            // Matrix Operations
-            dotProduct(matrixA, arrayB) {
-                // arrayB is treated as a column vector
-                let result = [];
-                for (let i = 0; i < matrixA.length; i++) {
-                    let sum = 0;
-                    for (let j = 0; j < matrixA[0].length; j++) {
-                        sum += matrixA[i][j] * arrayB[j];
+                // Backpropagate to input layer
+                for(let i = 0; i < this.nh; i++) {
+                    let d = dH[i] * (1 - this.h[i] * this.h[i]); // Derivative of tanh
+                    for(let j = 0; j < this.ni; j++) {
+                        // Update w1
+                        this.w1[i * this.ni + j] += this.lr * d * this.inp[j];
                     }
-                    result[i] = [sum];
+                    // Update b1
+                    this.b1[i] += this.lr * d;
                 }
-                return result;
-            }
-
-            addBias(matrix, bias) {
-                let result = [];
-                for (let i = 0; i < matrix.length; i++) {
-                    result[i] = [matrix[i][0] + bias[i][0]];
-                }
-                return result;
-            }
-
-            mapMatrix(matrix, func) {
-                let result = [];
-                for (let i = 0; i < matrix.length; i++) {
-                    result[i] = [func(matrix[i][0])];
-                }
-                return result;
-            }
-
-            // Genetic Algorithm Methods
-            copy() {
-                let clone = new NeuralNetwork(this.inputNodes, this.hiddenNodes, this.outputNodes);
-                clone.weightsIH = JSON.parse(JSON.stringify(this.weightsIH));
-                clone.weightsHO = JSON.parse(JSON.stringify(this.weightsHO));
-                clone.biasH = JSON.parse(JSON.stringify(this.biasH));
-                clone.biasO = JSON.parse(JSON.stringify(this.biasO));
-                return clone;
-            }
-
-            mutate(rate) {
-                const mutateFunc = (val) => {
-                    if (Math.random() < rate) {
-                        return val + ((Math.random() * 2) - 1) * 0.5; // Add Gaussian-ish noise
-                    }
-                    return val;
-                };
-                
-                this.weightsIH = this.mutateMatrix(this.weightsIH, mutateFunc);
-                this.weightsHO = this.mutateMatrix(this.weightsHO, mutateFunc);
-                this.biasH = this.mutateMatrix(this.biasH, mutateFunc);
-                this.biasO = this.mutateMatrix(this.biasO, mutateFunc);
-            }
-
-            mutateMatrix(matrix, func) {
-                for (let i = 0; i < matrix.length; i++) {
-                    for (let j = 0; j < matrix[0].length; j++) {
-                        matrix[i][j] = func(matrix[i][j]);
-                    }
-                }
-                return matrix;
-            }
-
-            crossover(partner) {
-                let child = new NeuralNetwork(this.inputNodes, this.hiddenNodes, this.outputNodes);
-                
-                const crossMatrix = (mA, mB) => {
-                    let mC = [];
-                    for (let i = 0; i < mA.length; i++) {
-                        mC[i] = [];
-                        for (let j = 0; j < mA[0].length; j++) {
-                            // 50% chance to inherit from either parent
-                            mC[i][j] = Math.random() < 0.5 ? mA[i][j] : mB[i][j];
-                        }
-                    }
-                    return mC;
-                };
-
-                child.weightsIH = crossMatrix(this.weightsIH, partner.weightsIH);
-                child.weightsHO = crossMatrix(this.weightsHO, partner.weightsHO);
-                child.biasH = crossMatrix(this.biasH, partner.biasH);
-                child.biasO = crossMatrix(this.biasO, partner.biasO);
-
-                return child;
             }
         }
 
+        // --- GAME ENGINE & PHYSICS ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width, height, floorY;
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            floorY = height - 100;
+        }
+        window.addEventListener('resize', resize);
+        resize();
 
-        // --- 2. CREATURE & PHYSICS IMPLEMENTATION ---
-        const Engine = Matter.Engine,
-              Render = Matter.Render,
-              Runner = Matter.Runner,
-              Body = Matter.Body,
-              Bodies = Matter.Bodies,
-              Composite = Matter.Composite,
-              Constraint = Matter.Constraint,
-              Vector = Matter.Vector,
-              Events = Matter.Events;
+        const GRAVITY = 0.25;
+        const DRAG = 0.99;
+        
+        let targets = [];
+        let crams = [];
+        let bullets = [];
+        let particles = [];
 
-        const CATEGORY_ENVIRONMENT = 0x0001;
-        const CATEGORY_BOT = 0x0002;
+        // Interaction state
+        let pointer = { x: 0, y: 0, vx: 0, vy: 0, isDown: false };
+        let lastPointer = { x: 0, y: 0 };
+        let draggedObj = null;
 
-        class Creature {
-            constructor(world, x, y, brain = null) {
-                this.world = world;
-                this.isDead = false;
-                this.fitness = 0;
-                this.startX = x;
-                this.timeAlive = 0;
+        // --- ENTITIES ---
 
-                // Neural Net Setup
-                // Inputs: 
-                // 1. Torso Angle, 2. Torso AngVel, 3. Torso Y pos
-                // 4-5. Torso Vel X, Y (Momentum awareness)
-                // 6-7. Lower Leg Global Angles (Orientation awareness)
-                // 8-16: 9 Joint Relative Angles, 17-25: 9 Joint AngVels
-                // 26-28: Raycasts (Forward, Down-Forward, Down)
-                this.inputs = 28; // Increased for waist joint
-                this.hidden = 18;
-                this.outputs = 9; // Target angles for 9 joints (added waist)
+        class Target {
+            constructor(type, x, y) {
+                this.type = type;
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 10;
+                this.vy = 0;
+                this.r = type === 'ball' ? 20 : 25; // radius / half-size
+                this.restitution = type === 'ball' ? 0.7 : 0.3;
+                this.color = type === 'ball' ? '#4facf7' : '#e6a14c';
+                this.dead = false;
+                this.hits = 0;
+            }
+
+            update() {
+                if (draggedObj === this) {
+                    this.x = pointer.x;
+                    this.y = pointer.y;
+                    this.vx = pointer.x - lastPointer.x;
+                    this.vy = pointer.y - lastPointer.y;
+                    return;
+                }
+
+                this.vy += GRAVITY;
+                this.vx *= DRAG;
+                this.vy *= DRAG;
+
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Floor collision
+                if (this.y + this.r > floorY) {
+                    this.y = floorY - this.r;
+                    this.vy *= -this.restitution;
+                    this.vx *= 0.95; // Ground friction
+                }
                 
-                if (brain) {
-                    this.brain = brain.copy();
+                // Wall collisions
+                if (this.x - this.r < 0) { this.x = this.r; this.vx *= -this.restitution; }
+                if (this.x + this.r > width) { this.x = width - this.r; this.vx *= -this.restitution; }
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.fillStyle = this.color;
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                
+                if (this.type === 'ball') {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.r, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
                 } else {
-                    this.brain = new NeuralNetwork(this.inputs, this.hidden, this.outputs);
+                    ctx.rotate(this.vx * 0.05); // Spin based on velocity
+                    ctx.beginPath();
+                    ctx.rect(-this.r, -this.r, this.r * 2, this.r * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                    // Crate details
+                    ctx.beginPath();
+                    ctx.moveTo(-this.r, -this.r); ctx.lineTo(this.r, this.r);
+                    ctx.moveTo(this.r, -this.r); ctx.lineTo(-this.r, this.r);
+                    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+        }
+
+        class CRAM {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.vy = 0;
+                // Neural Net: 4 inputs (dx, dy, tvx, tvy), 8 hidden, 1 output (angle_offset)
+                this.nn = new MLP(4, 8, 1);
+                this.cooldown = 0;
+                this.target = null;
+                this.aimAngle = -Math.PI / 2;
+                
+                // Stats
+                this.shotsFired = 0;
+                this.shotsHit = 0;
+                this.trainCount = 0;
+                this.accuracy = 0;
+            }
+
+            update() {
+                // Drop to floor
+                if (this.y < floorY) {
+                    this.vy += GRAVITY;
+                    this.y += this.vy;
+                    if (this.y > floorY) { this.y = floorY; this.vy = 0; }
                 }
 
-                this.smoothedOutputs = new Array(this.outputs).fill(0);
+                if (this.cooldown > 0) this.cooldown--;
 
-                // Physics Body Setup
-                this.group = Body.nextGroup(true); // Same group = don't collide with self
-                this.parts = [];
-                this.joints = [];
-                
-                this.buildBody(x, y);
+                // Find valid target (in air)
+                let bestTarget = null;
+                let minDist = Infinity;
+                for (let t of targets) {
+                    if (t.y > floorY - t.r - 10) continue; // Ignore grounded targets
+                    if (draggedObj === t) continue; // Ignore currently dragged targets
+                    let d = Math.hypot(t.x - this.x, t.y - this.y);
+                    if (d < minDist && d < 1200) { // Range limit
+                        minDist = d;
+                        bestTarget = t;
+                    }
+                }
+                this.target = bestTarget;
+
+                if (this.target) {
+                    // Neural Network Prediction
+                    let dx = this.target.x - this.x;
+                    let dy = this.target.y - this.y;
+                    
+                    // Normalize inputs for NN (crucial for stability)
+                    let inputs = [
+                        dx / 1000, 
+                        dy / 1000, 
+                        this.target.vx / 20, 
+                        this.target.vy / 20
+                    ];
+                    
+                    let nnOutput = this.nn.forward(inputs);
+                    let offsetAngle = nnOutput[0]; // Radians
+                    
+                    // Clip offset to prevent crazy spinning early on
+                    offsetAngle = Math.max(-1.5, Math.min(1.5, offsetAngle));
+
+                    let baseAngle = Math.atan2(dy, dx);
+                    let targetAimAngle = baseAngle + offsetAngle;
+                    
+                    // Smoothly rotate barrel
+                    let angleDiff = targetAimAngle - this.aimAngle;
+                    // Normalize diff
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                    
+                    this.aimAngle += angleDiff * 0.5;
+
+                    // Fire
+                    if (this.cooldown <= 0 && Math.abs(angleDiff) < 0.2) {
+                        this.fire(inputs, offsetAngle, baseAngle);
+                    }
+                } else {
+                    // Return to rest position
+                    let angleDiff = -Math.PI / 2 - this.aimAngle;
+                    this.aimAngle += angleDiff * 0.1;
+                }
             }
 
-            buildBody(x, y) {
-                const group = this.group;
-                const density = 0.01;
-                const friction = 0.8;
+            fire(inputs, predictedOffset, baseAngle) {
+                this.cooldown = 4; // Rapid fire
+                this.shotsFired++;
                 
-                // Styling
-                const renderOpts = { fillStyle: 'hsl(' + Math.floor(Math.random() * 360) + ', 70%, 60%)' };
-                const torsoRender = { fillStyle: '#ffffff' };
+                let bSpeed = 25;
+                let bx = Math.cos(this.aimAngle) * bSpeed;
+                let by = Math.sin(this.aimAngle) * bSpeed;
 
-                const botCollisionFilter = { 
-                    group: group, // Still use group to prevent self-collision
-                    category: CATEGORY_BOT,
-                    mask: CATEGORY_ENVIRONMENT 
-                };
+                // Barrel tip position
+                let tipX = this.x + Math.cos(this.aimAngle) * 30;
+                let tipY = this.y - 15 + Math.sin(this.aimAngle) * 30; // -15 is turret center offset
 
-                // 1. Torso (Split into Chest and Pelvis for waist control)
-                this.chest = Bodies.rectangle(x, y - 62.5, 20, 25, { 
-                    collisionFilter: botCollisionFilter, 
-                    density: density * 0.25, 
-                    render: torsoRender,
-                    label: 'Chest'
+                bullets.push({
+                    x: tipX, y: tipY,
+                    vx: bx, vy: by,
+                    parent: this,
+                    target: this.target,
+                    inputs: inputs,
+                    predictedOffset: predictedOffset,
+                    baseAngle: baseAngle,
+                    active: true,
+                    minDist: Infinity,
+                    evaluated: false
                 });
-                this.pelvis = Bodies.rectangle(x, y - 37.5, 20, 25, { 
-                    collisionFilter: botCollisionFilter, 
-                    density: density * 0.25, 
-                    render: torsoRender,
-                    label: 'Pelvis'
-                });
-                this.chest.creature = this;
-                this.pelvis.creature = this;
-                this.parts.push(this.chest, this.pelvis);
-                
-                // Alias torso to chest for legacy tracking (camera, fitness, death conditions)
-                this.torso = this.chest;
 
-                // Helper to create limbs
-                const createLimb = (offsetX, offsetY, width, upperLen, lowerLen, label) => {
-                    let upper = Bodies.rectangle(x + offsetX, y - 50 + offsetY, width, upperLen, { 
-                        collisionFilter: botCollisionFilter, density, render: renderOpts, label: label+'Upper' 
-                    });
-                    let lower = Bodies.rectangle(x + offsetX, y - 50 + offsetY + upperLen, width, lowerLen, { 
-                        collisionFilter: botCollisionFilter, 
-                        density: label.includes('Leg') ? density * 4.0 : density, // Heavier lower legs
-                        render: renderOpts, friction, label: label+'Lower' 
-                    });
-                    upper.creature = this;
-                    lower.creature = this;
-                    this.parts.push(upper, lower);
-                    return { upper, lower };
-                };
-
-                // Create 4 Limbs: 2 Legs, 2 Arms
-                this.legL = createLimb(0, 25, 12, 30, 30, 'LegL');
-                this.legR = createLimb(0, 25, 12, 30, 30, 'LegR');
-                this.armL = createLimb(0, -15, 8, 25, 25, 'ArmL');
-                this.armR = createLimb(0, -15, 8, 25, 25, 'ArmR');
-
-                // Connect Joints (Constraints)
-                const connect = (bodyA, bodyB, offsetA, offsetB, type = 'joint') => {
-                    let constraint = Constraint.create({
-                        bodyA: bodyA,
-                        pointA: offsetA,
-                        bodyB: bodyB,
-                        pointB: offsetB,
-                        stiffness: 1, // Rigid connection point
-                        length: 0,
-                        render: { visible: false }
-                    });
-                    Composite.add(this.world, constraint);
-                    // Store for our custom motor PD controller
-                    this.joints.push({ parent: bodyA, child: bodyB, type: type });
-                };
-
-                // Waist (Chest to Pelvis)
-                connect(this.chest, this.pelvis, {x:0, y:12}, {x:0, y:-12}, 'waist');
-
-                // Hips (Pelvis to Upper Legs)
-                connect(this.pelvis, this.legL.upper, {x:0, y:10}, {x:0, y:-12}, 'hip');
-                connect(this.pelvis, this.legR.upper, {x:0, y:10}, {x:0, y:-12}, 'hip');
-                
-                // Knees (Upper to Lower Legs)
-                connect(this.legL.upper, this.legL.lower, {x:0, y:12}, {x:0, y:-12}, 'knee');
-                connect(this.legR.upper, this.legR.lower, {x:0, y:12}, {x:0, y:-12}, 'knee');
-                
-                // Shoulders (Chest to Upper Arms)
-                connect(this.chest, this.armL.upper, {x:0, y:-10}, {x:0, y:-10}, 'shoulder');
-                connect(this.chest, this.armR.upper, {x:0, y:-10}, {x:0, y:-10}, 'shoulder');
-                
-                // Elbows (Upper to Lower Arms)
-                connect(this.armL.upper, this.armL.lower, {x:0, y:10}, {x:0, y:-10}, 'elbow');
-                connect(this.armR.upper, this.armR.lower, {x:0, y:10}, {x:0, y:-10}, 'elbow');
-
-                // Add all bodies to world
-                Composite.add(this.world, this.parts);
+                // Muzzle flash particles
+                for(let i=0; i<3; i++) {
+                    particles.push(new Particle(tipX, tipY, bx*0.2 + (Math.random()-0.5)*2, by*0.2 + (Math.random()-0.5)*2, '#ffaa00'));
+                }
             }
 
-            // Raycasting for sensors
-            getRayDistances(obstacles) {
-                // Simplified mock raycast based on nearest obstacle bounds since real raycasting 
-                // in Matter.js across many agents can be slow.
-                // We'll calculate distance to the nearest box in front of the creature.
-                let minDx = 1000;
-                let minDy = 1000;
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
                 
-                if (obstacles && obstacles.length > 0) {
-                    for(let obs of obstacles) {
-                        if(obs.position.x > this.torso.position.x && obs.position.x - this.torso.position.x < 500) {
-                            let dx = obs.position.x - this.torso.position.x;
-                            let dy = obs.position.y - this.torso.position.y;
-                            if(dx < minDx) {
-                                minDx = dx;
-                                minDy = dy;
-                            }
+                // Base
+                ctx.fillStyle = '#222';
+                ctx.strokeStyle = '#444';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(-30, 0); ctx.lineTo(-20, -15); ctx.lineTo(20, -15); ctx.lineTo(30, 0);
+                ctx.closePath();
+                ctx.fill(); ctx.stroke();
+                
+                // Turret / Barrel
+                ctx.translate(0, -15);
+                ctx.rotate(this.aimAngle);
+                
+                // Barrel
+                ctx.fillStyle = '#111';
+                ctx.fillRect(10, -4, 30, 8);
+                
+                // Dome
+                ctx.fillStyle = '#ddd';
+                ctx.beginPath();
+                ctx.arc(0, 0, 12, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.restore();
+
+                // UI Stats
+                ctx.save();
+                ctx.translate(this.x, this.y - 45);
+                ctx.textAlign = 'center';
+                ctx.font = '10px Inter';
+                
+                let acc = this.shotsFired > 0 ? ((this.shotsHit / this.shotsFired) * 100).toFixed(1) : "0.0";
+                
+                // Hit rate
+                ctx.fillStyle = '#00ffaa';
+                ctx.fillText(`HIT: ${acc}%`, 0, 0);
+                
+                // Gen / Training count
+                ctx.fillStyle = '#ffaa00';
+                ctx.fillText(`GEN: ${this.trainCount}`, 0, 12);
+                ctx.restore();
+            }
+        }
+
+        class Particle {
+            constructor(x, y, vx, vy, color) {
+                this.x = x; this.y = y;
+                this.vx = vx; this.vy = vy;
+                this.color = color;
+                this.life = 1.0;
+                this.decay = Math.random() * 0.05 + 0.02;
+            }
+            update() {
+                this.x += this.vx; this.y += this.vy;
+                this.life -= this.decay;
+            }
+            draw(ctx) {
+                ctx.globalAlpha = Math.max(0, this.life);
+                ctx.fillStyle = this.color;
+                ctx.beginPath(); ctx.arc(this.x, this.y, 2, 0, Math.PI*2); ctx.fill();
+                ctx.globalAlpha = 1.0;
+            }
+        }
+
+        // --- MAIN LOOP ---
+
+        function update() {
+            // Update pointers
+            if (pointer.isDown && draggedObj) {
+                pointer.vx = pointer.x - lastPointer.x;
+                pointer.vy = pointer.y - lastPointer.y;
+            }
+            lastPointer.x = pointer.x;
+            lastPointer.y = pointer.y;
+
+            // Update Entities
+            targets.forEach(t => t.update());
+            crams.forEach(c => c.update());
+            particles.forEach(p => p.update());
+            particles = particles.filter(p => p.life > 0);
+
+            // Update Bullets & Neural Network Training
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                let b = bullets[i];
+                if (!b.active) continue;
+
+                b.x += b.vx;
+                b.y += b.vy;
+
+                let t = b.target;
+                if (!t || t.dead) {
+                    b.active = false; 
+                    continue;
+                }
+
+                let dist = Math.hypot(b.x - t.x, b.y - t.y);
+
+                // Collision Detection
+                if (dist < t.r + 2) {
+                    // HIT!
+                    b.parent.shotsHit++;
+                    b.parent.trainCount++;
+                    b.active = false;
+                    
+                    // Train NN to enforce this good action (Loss = 0)
+                    b.parent.nn.train([b.predictedOffset]);
+                    
+                    // Physical impact
+                    t.vx += b.vx * 0.1;
+                    t.vy += b.vy * 0.1;
+                    
+                    t.hits++;
+                    if (t.hits >= 5) {
+                        t.dead = true;
+                        // Massive explosion
+                        for(let p = 0; p < 30; p++) {
+                            particles.push(new Particle(t.x, t.y, (Math.random()-0.5)*15, (Math.random()-0.5)*15, t.color));
+                            particles.push(new Particle(t.x, t.y, (Math.random()-0.5)*10, (Math.random()-0.5)*10, '#ffffff'));
+                            particles.push(new Particle(t.x, t.y, (Math.random()-0.5)*8, (Math.random()-0.5)*8, '#ff5555'));
                         }
+                    } else {
+                        // Small sparkles for normal hits
+                        for(let p = 0; p < 5; p++) particles.push(new Particle(b.x, b.y, (Math.random()-0.5)*5, (Math.random()-0.5)*5, '#ff5555'));
+                    }
+                    continue;
+                }
+
+                // AI Training Evaluation (The magic happens here)
+                if (!b.evaluated) {
+                    if (dist < b.minDist) {
+                        b.minDist = dist;
+                        // Record target position at closest approach
+                        b.closestTx = t.x;
+                        b.closestTy = t.y;
+                    } else if (dist > b.minDist + 1) {
+                        // Distance is increasing -> Bullet has passed the target! (Closest approach reached)
+                        b.evaluated = true;
+                        
+                        // Calculate the ideal angle that WOULD have hit the target at that moment
+                        let idealAngle = Math.atan2(b.closestTy - b.parent.y, b.closestTx - b.parent.x);
+                        
+                        // Calculate ideal offset relative to original base angle
+                        let idealOffset = idealAngle - b.baseAngle;
+                        
+                        // Normalize angle diff to -PI to PI
+                        while (idealOffset > Math.PI) idealOffset -= Math.PI * 2;
+                        while (idealOffset < -Math.PI) idealOffset += Math.PI * 2;
+
+                        // TRAIN THE NETWORK!
+                        b.parent.nn.train([idealOffset]);
+                        b.parent.trainCount++;
                     }
                 }
-                
-                // Normalize 
-                return [
-                    Math.min(1, minDx / 500), 
-                    Math.min(1, minDy / 500),
-                    this.torso.position.y / 1000 // Height above global 0 (rough metric)
-                ];
-            }
 
-            update(obstacles, mode) {
-                if (this.isDead) return;
-
-                this.timeAlive++;
-
-                // 1. Gather Inputs
-                let inputs = [];
-                inputs.push(this.torso.angle / Math.PI); // Normalize -1 to 1
-                inputs.push(this.torso.angularVelocity);
-                inputs.push(this.torso.position.y / 1000);
-
-                // NEW: Momentum and Global Orientation Awareness
-                inputs.push(this.torso.velocity.x / 10); // Forward/backward speed
-                inputs.push(this.torso.velocity.y / 10); // Falling speed
-                inputs.push(this.legL.lower.angle / Math.PI); // Left foot pointing direction
-                inputs.push(this.legR.lower.angle / Math.PI); // Right foot pointing direction
-
-                // Joint angles and velocities
-                for (let i = 0; i < this.outputs; i++) {
-                    let joint = this.joints[i];
-                    let relAngle = (joint.child.angle - joint.parent.angle);
-                    // Normalize relative angle
-                    while(relAngle > Math.PI) relAngle -= Math.PI*2;
-                    while(relAngle < -Math.PI) relAngle += Math.PI*2;
-                    
-                    inputs.push(relAngle / Math.PI);
-                    inputs.push(joint.child.angularVelocity - joint.parent.angularVelocity);
-                }
-
-                // Raycasts
-                let rays = this.getRayDistances(obstacles);
-                inputs.push(...rays);
-
-                // 2. Think
-                let outputs = this.brain.predict(inputs);
-
-                // 3. Act (Apply Motor Torques using PD Controller)
-                const maxTorque = 0.08; // Increased max torque muscle strength
-                const pGain = 0.06; // Increased Proportional gain
-                const dGain = 0.01; // Increased Derivative gain
-
-                for (let i = 0; i < this.outputs; i++) {
-                    let joint = this.joints[i];
-                    
-                    // Smooth the neural network output to prevent violent jittering
-                    this.smoothedOutputs[i] += (outputs[i] - this.smoothedOutputs[i]) * 0.15;
-
-                    // Map output (-1 to 1) to target angle (-PI/2 to PI/2 approx)
-                    let targetAngle = this.smoothedOutputs[i] * (Math.PI / 1.5); 
-                    
-                    // Constrain Knees and Waist to human-like limits
-                    if (joint.type === 'knee') {
-                        targetAngle = Math.max(-0.1, Math.min(Math.PI / 1.2, targetAngle));
-                    } else if (joint.type === 'waist') {
-                        targetAngle = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, targetAngle));
-                    }
-
-                    let currentRelAngle = joint.child.angle - joint.parent.angle;
-                    while(currentRelAngle > Math.PI) currentRelAngle -= Math.PI*2;
-                    while(currentRelAngle < -Math.PI) currentRelAngle += Math.PI*2;
-
-                    let error = targetAngle - currentRelAngle;
-                    let velError = joint.child.angularVelocity - joint.parent.angularVelocity;
-
-                    // PD calculation
-                    let torque = (error * pGain) - (velError * dGain);
-                    
-                    // Clamp torque
-                    torque = Math.max(-maxTorque, Math.min(maxTorque, torque));
-
-                    // Apply equal and opposite torque to parent and child
-                    joint.child.torque += torque;
-                    joint.parent.torque -= torque;
-                }
-
-                // 4. Check Death Conditions
-                let dist = this.torso.position.x - this.startX;
-                let tilt = Math.abs(this.torso.angle);
-                
-                // Grace period: allow bots to stabilize for the first 120 frames (2 seconds)
-                if (this.timeAlive > 120) {
-                    // STRICT STANDING: Die if tilted too much (crawling) or torso falls too low
-                    if (tilt > 1.3) { 
-                        this.die(); // Angle too extreme
-                    } else if (this.torso.position.y > this.legL.lower.position.y - 5 || 
-                               this.torso.position.y > this.legR.lower.position.y - 5) {
-                        this.die(); // Collapsed (Torso lower than legs)
-                    } else if (dist < -300) {
-                        this.die(); // Too far backwards
-                    }
+                // Remove offscreen
+                if (b.x < 0 || b.x > width || b.y < 0 || b.y > height) {
+                    b.active = false;
                 }
             }
-
-            calculateFitness() {
-                if (this.fitness !== 0) return this.fitness; // Already calculated
-                
-                let dist = this.torso.position.x - this.startX;
-                let fit = 0;
-                
-                // 1. SURVIVAL & POSTURE (Primary Goal)
-                // Base reward for staying alive
-                fit += this.timeAlive * 5.0; 
-                
-                // Reward for keeping torso high above the feet
-                let avgFootY = (this.legL.lower.position.y + this.legR.lower.position.y) / 2;
-                let heightDiff = Math.max(0, avgFootY - this.torso.position.y);
-                fit += heightDiff * 2.0;
-                
-                // 2. DISTANCE (Secondary Goal)
-                // Prevent "leap and die": distance is multiplied by the square of their survival ratio.
-                // A bot that leaps and dies early gets almost no distance points.
-                let survivalRatio = this.timeAlive / GENERATION_TIME;
-                if (dist > 0) {
-                    fit += dist * 2.0 * (survivalRatio * survivalRatio);
+            
+            // Clean up dead objects
+            bullets = bullets.filter(b => b.active);
+            targets = targets.filter(t => {
+                if (t.dead && draggedObj === t) {
+                    draggedObj = null;
+                    pointer.isDown = false;
                 }
-                
-                // 3. PUNISHMENTS
-                // Penalty for being tilted over
-                let tiltPenalty = Math.abs(this.torso.angle);
-                fit -= tiltPenalty * 50;
+                return !t.dead;
+            });
+        }
 
-                // Harsh punishment for falling over before the time is up
-                if (this.timeAlive < GENERATION_TIME) {
-                    fit *= 0.3; // Slash total score by 70% if they didn't survive the whole round
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            // Draw Background Gradients / Atmosphere
+            let grad = ctx.createLinearGradient(0, 0, 0, height);
+            grad.addColorStop(0, '#0b0c10');
+            grad.addColorStop(1, '#1f2833');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, width, height);
+
+            // Draw Floor
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, floorY, width, height - floorY);
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.moveTo(0, floorY); ctx.lineTo(width, floorY); ctx.stroke();
+
+            // Draw Targets & CRAMs
+            targets.forEach(t => t.draw(ctx));
+            crams.forEach(c => c.draw(ctx));
+
+            // Draw Neon Bullets (Red Tracers)
+            ctx.save();
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = "#ff0000";
+            ctx.strokeStyle = "#ff4444";
+            ctx.lineCap = "round";
+            ctx.lineWidth = 3;
+            
+            ctx.beginPath();
+            for (let b of bullets) {
+                ctx.moveTo(b.x, b.y);
+                // Draw tracer tail based on velocity
+                ctx.lineTo(b.x - b.vx * 0.8, b.y - b.vy * 0.8);
+            }
+            ctx.stroke();
+            ctx.restore();
+
+            // Draw Particles
+            particles.forEach(p => p.draw(ctx));
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+        }
+
+        // --- INPUT HANDLING ---
+
+        function getMousePos(e) {
+            if(e.touches) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            return { x: e.clientX, y: e.clientY };
+        }
+
+        function pointerDown(e) {
+            let pos = getMousePos(e);
+            pointer.x = pos.x; pointer.y = pos.y;
+            pointer.isDown = true;
+            
+            // Check for drag
+            for (let t of targets) {
+                if (Math.hypot(t.x - pointer.x, t.y - pointer.y) < t.r * 1.5) {
+                    draggedObj = t;
+                    t.vx = 0; t.vy = 0;
+                    break;
                 }
-
-                this.fitness = Math.max(0.1, fit); // Minimum fitness to avoid zero
-                return this.fitness;
-            }
-
-            die() {
-                if (this.isDead) return; // Prevent multiple triggers
-                this.isDead = true;
-                this.calculateFitness();
-                
-                // Instantly remove from physics world to eliminate lag
-                this.destroy();
-            }
-
-            destroy() {
-                Composite.remove(this.world, this.parts);
             }
         }
 
-
-        // --- 3. MAIN SIMULATION & EVOLUTION LOOP ---
-        const canvasContainer = document.getElementById('canvas-container');
-        
-        // Matter.js Setup
-        const engine = Engine.create();
-        const world = engine.world;
-        engine.gravity.y = 1; // Earth-like gravity
-
-        Events.on(engine, 'collisionStart', function(event) {
-            const pairs = event.pairs;
-            for (let i = 0; i < pairs.length; i++) {
-                const bodyA = pairs[i].bodyA;
-                const bodyB = pairs[i].bodyB;
-                
-                const isAEnv = bodyA.collisionFilter.category === CATEGORY_ENVIRONMENT;
-                const isBEnv = bodyB.collisionFilter.category === CATEGORY_ENVIRONMENT;
-                
-                if (isAEnv && bodyB.creature && !bodyB.creature.isDead) {
-                    // Only allow lower legs to touch the ground/environment
-                    if (bodyB.label !== 'LegLLower' && bodyB.label !== 'LegRLower') {
-                        bodyB.creature.die();
-                    }
-                } else if (isBEnv && bodyA.creature && !bodyA.creature.isDead) {
-                    // Only allow lower legs to touch the ground/environment
-                    if (bodyA.label !== 'LegLLower' && bodyA.label !== 'LegRLower') {
-                        bodyA.creature.die();
-                    }
-                }
-            }
-        });
-
-        const render = Render.create({
-            element: canvasContainer,
-            engine: engine,
-            options: {
-                width: window.innerWidth,
-                height: window.innerHeight,
-                wireframes: false,
-                background: 'transparent',
-                hasBounds: true // Enable camera panning
-            }
-        });
-
-        Render.run(render);
-
-        // UI Elements
-        const statGen = document.getElementById('stat-gen');
-        const statAlive = document.getElementById('stat-alive');
-        const statTime = document.getElementById('stat-time');
-        const statBestFit = document.getElementById('stat-best-fit');
-        const statBestDist = document.getElementById('stat-best-dist');
-        const speedSlider = document.getElementById('speed-slider');
-        const speedVal = document.getElementById('speed-val');
-        const modeSelect = document.getElementById('mode-select');
-        const mapSelect = document.getElementById('map-select');
-        const btnReset = document.getElementById('btn-reset');
-        const btnKill = document.getElementById('btn-kill');
-        
-        // New UI Elements
-        const popSlider = document.getElementById('pop-slider');
-        const popVal = document.getElementById('pop-val');
-        const renderBestToggle = document.getElementById('render-best-toggle');
-
-        // Simulation Configuration
-        let POPULATION_SIZE = 30; // Changed to let so it can be updated
-        const GENERATION_TIME = 600; // frames per generation
-        
-        let population = [];
-        let generation = 1;
-        let frameCount = 0;
-        let simSpeed = parseInt(speedSlider.value);
-        let bestGlobalFitness = 0;
-        let renderBestOnly = false;
-        
-        let obstacles = [];
-        let groundBodies = [];
-
-        // UI Panel Interaction Logic
-        let closedPanels = 0;
-        document.querySelectorAll('.panel').forEach(panel => {
-            const header = panel.querySelector('.panel-header');
-            const minBtn = panel.querySelector('.minimize-btn');
-            const closeBtn = panel.querySelector('.close-btn');
-            
-            // Dragging
-            let isDragging = false, startX, startY, initialX, initialY;
-            
-            header.addEventListener('mousedown', (e) => {
-                if(e.target.closest('.window-controls')) return;
-                isDragging = true;
-                startX = e.clientX;
-                startY = e.clientY;
-                initialX = panel.offsetLeft;
-                initialY = panel.offsetTop;
-                panel.style.zIndex = 100; // Bring to front
-            });
-            
-            document.addEventListener('mousemove', (e) => {
-                if(!isDragging) return;
-                const dx = e.clientX - startX;
-                const dy = e.clientY - startY;
-                panel.style.left = `${initialX + dx}px`;
-                panel.style.top = `${initialY + dy}px`;
-                // Keep right property from interfering if dragged
-                panel.style.right = 'auto'; 
-            });
-            
-            document.addEventListener('mouseup', () => {
-                isDragging = false;
-                panel.style.zIndex = '';
-            });
-
-            // Minimize
-            minBtn.addEventListener('click', () => {
-                panel.classList.toggle('minimized');
-            });
-
-            // Close
-            closeBtn.addEventListener('click', () => {
-                panel.style.display = 'none';
-                closedPanels++;
-                document.getElementById('restore-ui-btn').style.display = 'flex';
-            });
-        });
-
-        document.getElementById('restore-ui-btn').addEventListener('click', () => {
-            document.querySelectorAll('.panel').forEach(p => p.style.display = 'flex');
-            closedPanels = 0;
-            document.getElementById('restore-ui-btn').style.display = 'none';
-        });
-
-
-        // Camera Panning Logic
-        let isCameraAuto = true;
-        let isCanvasDragging = false;
-        let lastMouseX = 0, lastMouseY = 0;
-        const recenterBtn = document.getElementById('recenter-camera-btn');
-
-        canvasContainer.addEventListener('mousedown', (e) => {
-            if(e.target.closest('.panel') || e.target.closest('button')) return;
-            isCanvasDragging = true;
-            lastMouseX = e.clientX;
-            lastMouseY = e.clientY;
-            document.body.style.cursor = 'grabbing';
-            
-            if (isCameraAuto) {
-                isCameraAuto = false;
-                recenterBtn.style.display = 'flex';
-            }
-        });
-
-        window.addEventListener('mousemove', (e) => {
-            if (!isCanvasDragging) return;
-            
-            const dx = e.clientX - lastMouseX;
-            const dy = e.clientY - lastMouseY;
-            lastMouseX = e.clientX;
-            lastMouseY = e.clientY;
-
-            // Pan the camera by moving the bounds in the opposite direction
-            const bounds = render.bounds;
-            bounds.min.x -= dx;
-            bounds.max.x -= dx;
-            bounds.min.y -= dy;
-            bounds.max.y -= dy;
-        });
-
-        window.addEventListener('mouseup', () => {
-            isCanvasDragging = false;
-            document.body.style.cursor = 'default';
-        });
-        
-        recenterBtn.addEventListener('click', () => {
-            isCameraAuto = true;
-            recenterBtn.style.display = 'none';
-        });
-
-
-        function initMap() {
-            // Clear old map
-            Composite.remove(world, obstacles);
-            Composite.remove(world, groundBodies);
-            obstacles = [];
-            groundBodies = [];
-
-            let mapType = mapSelect.value;
-
-            const groundOptions = { 
-                isStatic: true, 
-                render: { fillStyle: '#334155' }, 
-                friction: 1.0,
-                collisionFilter: { category: CATEGORY_ENVIRONMENT }
-            };
-
-            if (mapType === 'flat' || mapType === 'boxes') {
-                // Infinite-feeling flat ground (very wide)
-                let ground = Bodies.rectangle(5000, 600, 20000, 100, groundOptions);
-                groundBodies.push(ground);
-
-                if (mapType === 'boxes') {
-                    // Spawn boxes every ~400px
-                    for (let i = 400; i < 10000; i += 400 + Math.random()*200) {
-                        let size = 30 + Math.random() * 30;
-                        let box = Bodies.rectangle(i, 550 - size/2, size, size, { 
-                            isStatic: true, 
-                            render: { fillStyle: '#f59e0b' }, // Amber
-                            collisionFilter: { category: CATEGORY_ENVIRONMENT }
-                        });
-                        obstacles.push(box);
-                    }
-                }
-            } else if (mapType === 'hills') {
-                // Generate uneven terrain using varying width/angle rectangles
-                let startX = -1000;
-                let currentY = 600;
-                for (let i = 0; i < 50; i++) {
-                    let width = 300 + Math.random() * 400;
-                    let angle = (Math.random() - 0.5) * 0.4; // max tilt
-                    let hill = Bodies.rectangle(startX + width/2, currentY, width, 100, {
-                        ...groundOptions,
-                        angle: angle
-                    });
-                    groundBodies.push(hill);
-                    startX += width * Math.cos(angle);
-                    currentY += width * Math.sin(angle);
-                }
-            }
-
-            Composite.add(world, groundBodies);
-            Composite.add(world, obstacles);
+        function pointerMove(e) {
+            let pos = getMousePos(e);
+            pointer.x = pos.x; pointer.y = pos.y;
         }
 
-        function spawnPopulation(brains = []) {
-            population.forEach(p => p.destroy());
-            population = [];
-            
-            for (let i = 0; i < POPULATION_SIZE; i++) {
-                let startX = (Math.random() - 0.5) * 50; // Slight stagger
-                let brain = brains.length > 0 ? brains[i] : null;
-                population.push(new Creature(world, startX, 400, brain));
-            }
-            frameCount = 0;
-            statGen.innerText = generation;
-        }
-
-        function evolve() {
-            // 1. Calculate fitness for all
-            population.forEach(p => p.calculateFitness());
-            
-            // 2. Sort by fitness descending
-            population.sort((a, b) => b.fitness - a.fitness);
-
-            let bestFit = population[0].fitness;
-            let bestDist = population[0].torso.position.x - population[0].startX;
-            
-            if (bestFit > bestGlobalFitness) bestGlobalFitness = bestFit;
-            
-            statBestFit.innerText = bestGlobalFitness.toFixed(1);
-            statBestDist.innerText = (bestDist / 50).toFixed(1) + 'm'; // Scale down distance for display
-
-            // 3. Selection & Reproduction
-            let nextBrains = [];
-            
-            // Elitism: Keep best 2 exactly as they are
-            nextBrains.push(population[0].brain.copy());
-            nextBrains.push(population[1].brain.copy());
-
-            // Helper to pick a parent (Roulette Wheel based on fitness)
-            const selectParent = () => {
-                let totalFitness = population.reduce((sum, p) => sum + p.fitness, 0);
-                let r = Math.random() * totalFitness;
-                let runningSum = 0;
-                for (let p of population) {
-                    runningSum += p.fitness;
-                    if (runningSum >= r) return p.brain;
-                }
-                return population[0].brain;
-            };
-
-            // Generate rest of population
-            for (let i = 2; i < POPULATION_SIZE; i++) {
-                let parentA = selectParent();
-                let parentB = selectParent();
-                
-                let childBrain = parentA.crossover(parentB);
-                childBrain.mutate(0.1); // 10% mutation rate
-                nextBrains.push(childBrain);
-            }
-
-            generation++;
-            spawnPopulation(nextBrains);
-        }
-
-        // Camera Follow Logic
-        function updateCamera() {
-            // Find the furthest living creature
-            let bestX = -Infinity;
-            let bestY = 0;
-            let aliveCount = 0;
-            let bestBot = null;
-            
-            for (let p of population) {
-                if (!p.isDead) {
-                    aliveCount++;
-                    if (p.torso.position.x > bestX) {
-                        bestX = p.torso.position.x;
-                        bestY = p.torso.position.y;
-                        bestBot = p;
-                    }
-                }
-            }
-
-            // Draw Call Optimization: Hide poorly performing bots
-            if (renderBestOnly && bestBot) {
-                for (let p of population) {
-                    if (p.isDead) continue; // Skip already removed bots
-                    let isVisible = (p === bestBot);
-                    p.parts.forEach(part => part.render.visible = isVisible);
-                }
-            }
-
-            statAlive.innerText = `${aliveCount} / ${population.length}`;
-            statTime.innerText = Math.ceil((GENERATION_TIME - frameCount) / 60) + 's';
-
-            if (aliveCount === 0 || frameCount >= GENERATION_TIME) {
-                evolve();
-                return;
-            }
-
-            if (!isCameraAuto) return; // Skip updating bounds if free panning
-
-            // Smoothly move camera to best creature
-            let width = render.options.width;
-            let height = render.options.height;
-            
-            // Bounds calculation to center on bestX
-            if (bestX !== -Infinity) {
-                let targetMinX = bestX - width * 0.3; // 30% from left edge
-                let targetMaxX = targetMinX + width;
-                let targetMinY = bestY - height * 0.6;
-                let targetMaxY = targetMinY + height;
-
-                // Simple LERP for smooth camera
-                let lerp = 0.1;
-                let currentBounds = render.bounds;
-                
-                currentBounds.min.x += (targetMinX - currentBounds.min.x) * lerp;
-                currentBounds.max.x += (targetMaxX - currentBounds.max.x) * lerp;
-                currentBounds.min.y += (targetMinY - currentBounds.min.y) * lerp;
-                currentBounds.max.y += (targetMaxY - currentBounds.max.y) * lerp;
+        function pointerUp(e) {
+            pointer.isDown = false;
+            if (draggedObj) {
+                // Apply final velocity from throw
+                draggedObj.vx = pointer.vx;
+                draggedObj.vy = pointer.vy;
+                draggedObj = null;
             }
         }
 
-        // --- BACKGROUND WORKER FOR PHYSICS LOOP ---
-        // Decoupled from requestAnimationFrame so it runs in background tabs
-        const workerCode = `
-            self.onmessage = function(e) {
-                // Ping-pong architecture: Worker only sends a tick when the main thread says it's ready
-                if (e.data === 'start' || e.data === 'done') {
-                    setTimeout(() => self.postMessage('tick'), 1000 / 60);
-                }
-            };
-        `;
-        const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
-        const workerTimer = new Worker(URL.createObjectURL(workerBlob));
+        canvas.addEventListener('mousedown', pointerDown);
+        canvas.addEventListener('mousemove', pointerMove);
+        window.addEventListener('mouseup', pointerUp);
+        
+        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); pointerDown(e); }, {passive: false});
+        canvas.addEventListener('touchmove', (e) => { e.preventDefault(); pointerMove(e); }, {passive: false});
+        window.addEventListener('touchend', pointerUp);
 
-        workerTimer.onmessage = function(e) {
-            if (e.data === 'tick') {
-                // Allow multiple simulation steps per frame based on speed
-                for (let s = 0; s < simSpeed; s++) {
-                    // Update Physics manually
-                    Engine.update(engine, 1000 / 60); 
-
-                    // Update Creatures
-                    let mode = modeSelect.value;
-                    for (let p of population) {
-                        p.update(obstacles, mode);
-                    }
-
-                    frameCount++;
-                    if(frameCount >= GENERATION_TIME) break; // Don't over-simulate if time is up
-                }
-
-                updateCamera();
-                
-                // Tell the worker we finished processing this frame, so it can queue the next one
-                workerTimer.postMessage('done'); 
-            }
-        };
-
-        // Events
-        window.addEventListener('resize', () => {
-            render.canvas.width = window.innerWidth;
-            render.canvas.height = window.innerHeight;
-            render.options.width = window.innerWidth;
-            render.options.height = window.innerHeight;
+        // --- UI BINDINGS ---
+        
+        document.getElementById('btn-ball').addEventListener('click', () => {
+            targets.push(new Target('ball', width/2 + (Math.random()-0.5)*100, 100));
+        });
+        
+        document.getElementById('btn-crate').addEventListener('click', () => {
+            targets.push(new Target('crate', width/2 + (Math.random()-0.5)*100, 100));
         });
 
-        speedSlider.addEventListener('input', (e) => {
-            simSpeed = parseInt(e.target.value);
-            speedVal.innerText = simSpeed + 'x';
-        });
-
-        popSlider.addEventListener('input', (e) => {
-            POPULATION_SIZE = parseInt(e.target.value);
-            popVal.innerText = POPULATION_SIZE;
-        });
-
-        renderBestToggle.addEventListener('change', (e) => {
-            renderBestOnly = e.target.checked;
-            // Instantly restore visibility if turned off
-            if (!renderBestOnly) {
-                population.forEach(p => {
-                    p.parts.forEach(part => part.render.visible = true);
-                });
+        document.getElementById('btn-cram').addEventListener('click', () => {
+            if (crams.length < 5) {
+                crams.push(new CRAM(width/2 + (Math.random()-0.5)*400, -50));
             }
         });
 
-        mapSelect.addEventListener('change', () => {
-            initMap();
-            generation = 1;
-            bestGlobalFitness = 0;
-            spawnPopulation();
+        document.getElementById('btn-clear').addEventListener('click', () => {
+            targets = [];
+            bullets = [];
         });
 
-        btnReset.addEventListener('click', () => {
-            generation = 1;
-            bestGlobalFitness = 0;
-            spawnPopulation();
-        });
+        // Initialize setup
+        crams.push(new CRAM(width/2, floorY));
+        targets.push(new Target('ball', width/2 - 200, 200));
 
-        btnKill.addEventListener('click', () => {
-            population.forEach(p => p.die());
-            frameCount = GENERATION_TIME; // force evolution next frame
-        });
-
-
-        // Initialize
-        initMap();
-        spawnPopulation();
-        workerTimer.postMessage('start');
+        // Start loop
+        requestAnimationFrame(gameLoop);
 
     </script>
 </body>
