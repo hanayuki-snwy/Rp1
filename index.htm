@@ -34,22 +34,86 @@
             height: 100%;
             z-index: 10;
             pointer-events: none; /* Let clicks pass through to UI elements */
-            display: flex;
-            justify-content: space-between;
-            padding: 1.5rem;
-            box-sizing: border-box;
+            overflow: hidden; /* Keep dragged panels inside */
         }
         .panel {
-            background: rgba(30, 41, 59, 0.85); /* slate-800 with opacity */
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            position: absolute;
+            background: rgba(15, 23, 42, 0.4); /* Glassmorphic darker slate */
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
             border-radius: 1rem;
-            padding: 1.25rem;
             pointer-events: auto; /* Enable clicks on the panels */
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-            max-height: 90vh;
-            overflow-y: auto;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            transition: height 0.3s ease, opacity 0.3s ease;
         }
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            cursor: grab;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            user-select: none;
+        }
+        .panel-header:active {
+            cursor: grabbing;
+        }
+        .panel-content {
+            padding: 1rem;
+            overflow-y: auto;
+            max-height: calc(80vh - 50px);
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
+        }
+        .panel.minimized .panel-content {
+            max-height: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+            opacity: 0;
+            overflow: hidden;
+        }
+        .window-controls button {
+            background: none;
+            border: none;
+            color: #94a3b8;
+            cursor: pointer;
+            padding: 0.25rem;
+            border-radius: 50%;
+            transition: color 0.2s, background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+        }
+        .window-controls button:hover {
+            color: white;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        #restore-ui-btn {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            pointer-events: auto;
+            display: none;
+            z-index: 20;
+        }
+        #recenter-camera-btn {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            pointer-events: auto;
+            display: none;
+            z-index: 20;
+        }
+        
         /* Custom scrollbar for webkit */
         ::-webkit-scrollbar {
             width: 6px;
@@ -70,76 +134,112 @@
 
     <!-- UI Overlay -->
     <div id="ui-layer">
+        
         <!-- Stats Panel (Left) -->
-        <div class="panel w-64 flex flex-col gap-4">
-            <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-teal-300">AI Evolution</h1>
-            
-            <div class="flex flex-col gap-1 text-sm text-slate-300">
-                <div class="flex justify-between">
-                    <span>Generation:</span>
-                    <span id="stat-gen" class="font-bold text-white">1</span>
-                </div>
-                <div class="flex justify-between">
-                    <span>Alive:</span>
-                    <span id="stat-alive" class="font-bold text-white">0 / 0</span>
-                </div>
-                <div class="flex justify-between">
-                    <span>Time Left:</span>
-                    <span id="stat-time" class="font-bold text-white">0s</span>
-                </div>
-                <div class="flex justify-between mt-2 pt-2 border-t border-slate-600">
-                    <span>Best Fitness:</span>
-                    <span id="stat-best-fit" class="font-bold text-teal-400">0.0</span>
-                </div>
-                <div class="flex justify-between">
-                    <span>Best Distance:</span>
-                    <span id="stat-best-dist" class="font-bold text-teal-400">0m</span>
+        <div class="panel w-64" id="panel-stats" style="top: 20px; left: 20px;">
+            <div class="panel-header drag-handle">
+                <span class="font-bold text-sm text-white tracking-wider uppercase">Evolution Stats</span>
+                <div class="window-controls flex gap-1">
+                    <button class="minimize-btn" title="Minimize">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                    <button class="close-btn" title="Close">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
                 </div>
             </div>
+            <div class="panel-content">
+                <div class="flex flex-col gap-1 text-sm text-slate-300">
+                    <div class="flex justify-between">
+                        <span>Generation:</span>
+                        <span id="stat-gen" class="font-bold text-white">1</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Alive:</span>
+                        <span id="stat-alive" class="font-bold text-white">0 / 0</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Time Left:</span>
+                        <span id="stat-time" class="font-bold text-white">0s</span>
+                    </div>
+                    <div class="flex justify-between mt-2 pt-2 border-t border-slate-600">
+                        <span>Best Fitness:</span>
+                        <span id="stat-best-fit" class="font-bold text-teal-400">0.0</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Best Distance:</span>
+                        <span id="stat-best-dist" class="font-bold text-teal-400">0m</span>
+                    </div>
+                </div>
 
-            <div class="text-xs text-slate-400 mt-4 leading-relaxed">
-                <strong>Goal:</strong> The AI learns to control its 8 joints using Neuroevolution. It is rewarded for moving forward and keeping its torso upright. It dies if its torso hits the ground.
+                <div class="text-xs text-slate-400 mt-2 leading-relaxed">
+                    <strong>Goal:</strong> The AI learns to control its 8 joints using Neuroevolution. It is rewarded for moving forward and keeping its torso upright. It dies if its torso hits the ground.
+                </div>
             </div>
         </div>
 
         <!-- Controls Panel (Right) -->
-        <div class="panel w-72 flex flex-col gap-5">
-            <h2 class="text-lg font-semibold border-b border-slate-600 pb-2">Simulation Controls</h2>
-            
-            <!-- Speed Control -->
-            <div class="flex flex-col gap-2">
-                <label for="speed-slider" class="text-sm font-medium flex justify-between">
-                    Simulation Speed <span id="speed-val" class="text-blue-400">1x</span>
-                </label>
-                <input type="range" id="speed-slider" min="1" max="10" value="2" class="w-full cursor-pointer accent-blue-500">
+        <div class="panel w-72" id="panel-controls" style="top: 20px; right: 20px;">
+            <div class="panel-header drag-handle">
+                <span class="font-bold text-sm text-white tracking-wider uppercase">Simulation Controls</span>
+                <div class="window-controls flex gap-1">
+                    <button class="minimize-btn" title="Minimize">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                    <button class="close-btn" title="Close">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
             </div>
+            <div class="panel-content">
+                <!-- Speed Control -->
+                <div class="flex flex-col gap-2">
+                    <label for="speed-slider" class="text-sm font-medium flex justify-between text-slate-200">
+                        Simulation Speed <span id="speed-val" class="text-blue-400">1x</span>
+                    </label>
+                    <input type="range" id="speed-slider" min="1" max="10" value="2" class="w-full cursor-pointer accent-blue-500">
+                </div>
 
-            <!-- Training Mode -->
-            <div class="flex flex-col gap-2">
-                <label for="mode-select" class="text-sm font-medium">Training Mode</label>
-                <select id="mode-select" class="w-full bg-slate-700 text-white rounded px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer border border-slate-600">
-                    <option value="walk">Walk / Run</option>
-                    <option value="jump">Jump Over Boxes</option>
-                </select>
+                <!-- Training Mode -->
+                <div class="flex flex-col gap-2">
+                    <label for="mode-select" class="text-sm font-medium text-slate-200">Training Mode</label>
+                    <select id="mode-select" class="w-full bg-slate-800/80 text-white rounded px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer border border-slate-600 backdrop-blur-md">
+                        <option value="walk">Walk / Run</option>
+                        <option value="jump">Jump Over Boxes</option>
+                    </select>
+                </div>
+
+                <!-- Map Selector -->
+                <div class="flex flex-col gap-2">
+                    <label for="map-select" class="text-sm font-medium text-slate-200">Environment Map</label>
+                    <select id="map-select" class="w-full bg-slate-800/80 text-white rounded px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer border border-slate-600 backdrop-blur-md">
+                        <option value="flat">Flat Concrete</option>
+                        <option value="boxes">Flat with Boxes</option>
+                        <option value="hills">Hills / Uneven</option>
+                    </select>
+                </div>
+
+                <div class="flex flex-col gap-2 mt-2">
+                    <button id="btn-reset" class="bg-blue-600/80 hover:bg-blue-500 text-white py-2 rounded-lg text-sm font-bold transition shadow-lg backdrop-blur-md border border-blue-500/50">
+                        Restart Evolution
+                    </button>
+                    <button id="btn-kill" class="bg-red-500/80 hover:bg-red-400 text-white py-2 rounded-lg text-sm font-bold transition shadow-lg backdrop-blur-md border border-red-500/50">
+                        Kill All (Next Gen)
+                    </button>
+                </div>
             </div>
-
-            <!-- Map Selector -->
-            <div class="flex flex-col gap-2">
-                <label for="map-select" class="text-sm font-medium">Environment Map</label>
-                <select id="map-select" class="w-full bg-slate-700 text-white rounded px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer border border-slate-600">
-                    <option value="flat">Flat Concrete</option>
-                    <option value="boxes">Flat with Boxes</option>
-                    <option value="hills">Hills / Uneven</option>
-                </select>
-            </div>
-
-            <button id="btn-reset" class="mt-2 bg-red-500 hover:bg-red-600 text-white py-2 rounded-lg text-sm font-bold transition shadow-lg shadow-red-500/30">
-                Restart Evolution
-            </button>
-            <button id="btn-kill" class="bg-yellow-500 hover:bg-yellow-600 text-white py-2 rounded-lg text-sm font-bold transition shadow-lg shadow-yellow-500/30">
-                Kill All (Next Gen)
-            </button>
         </div>
+
+        <button id="restore-ui-btn" class="bg-slate-700/80 hover:bg-slate-600 text-white py-2 px-4 rounded-full text-sm font-bold transition shadow-lg backdrop-blur-md border border-slate-500 flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14h6v6H4zm10 0h6v6h-6zM4 4h6v6H4zm10 0h6v6h-6z"/></svg>
+            Restore UI Panels
+        </button>
+
+        <button id="recenter-camera-btn" class="bg-indigo-600/80 hover:bg-indigo-500 text-white py-2 px-6 rounded-full text-sm font-bold transition shadow-lg backdrop-blur-md border border-indigo-400 flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+            Recenter Camera
+        </button>
+
     </div>
 
     <!-- Application Logic -->
@@ -286,7 +386,11 @@
               Bodies = Matter.Bodies,
               Composite = Matter.Composite,
               Constraint = Matter.Constraint,
-              Vector = Matter.Vector;
+              Vector = Matter.Vector,
+              Events = Matter.Events;
+
+        const CATEGORY_ENVIRONMENT = 0x0001;
+        const CATEGORY_BOT = 0x0002;
 
         class Creature {
             constructor(world, x, y, brain = null) {
@@ -311,6 +415,8 @@
                     this.brain = new NeuralNetwork(this.inputs, this.hidden, this.outputs);
                 }
 
+                this.smoothedOutputs = new Array(this.outputs).fill(0);
+
                 // Physics Body Setup
                 this.group = Body.nextGroup(true); // Same group = don't collide with self
                 this.parts = [];
@@ -328,22 +434,34 @@
                 const renderOpts = { fillStyle: 'hsl(' + Math.floor(Math.random() * 360) + ', 70%, 60%)' };
                 const torsoRender = { fillStyle: '#ffffff' };
 
+                const botCollisionFilter = { 
+                    group: group, // Still use group to prevent self-collision
+                    category: CATEGORY_BOT,
+                    mask: CATEGORY_ENVIRONMENT 
+                };
+
                 // 1. Torso
                 this.torso = Bodies.rectangle(x, y - 50, 20, 50, { 
-                    collisionFilter: { group: group }, 
-                    density: density * 1.5,
-                    render: torsoRender 
+                    collisionFilter: botCollisionFilter, 
+                    density: density * 0.5, // Lighter torso for lower center of gravity
+                    render: torsoRender,
+                    label: 'Torso'
                 });
+                this.torso.creature = this;
                 this.parts.push(this.torso);
 
                 // Helper to create limbs
                 const createLimb = (offsetX, offsetY, width, upperLen, lowerLen, label) => {
                     let upper = Bodies.rectangle(x + offsetX, y - 50 + offsetY, width, upperLen, { 
-                        collisionFilter: { group: group }, density, render: renderOpts, label: label+'Upper' 
+                        collisionFilter: botCollisionFilter, density, render: renderOpts, label: label+'Upper' 
                     });
                     let lower = Bodies.rectangle(x + offsetX, y - 50 + offsetY + upperLen, width, lowerLen, { 
-                        collisionFilter: { group: group }, density, render: renderOpts, friction, label: label+'Lower' 
+                        collisionFilter: botCollisionFilter, 
+                        density: label.includes('Leg') ? density * 4.0 : density, // Heavier lower legs
+                        render: renderOpts, friction, label: label+'Lower' 
                     });
+                    upper.creature = this;
+                    lower.creature = this;
                     this.parts.push(upper, lower);
                     return { upper, lower };
                 };
@@ -355,7 +473,7 @@
                 this.armR = createLimb(0, -15, 8, 25, 25, 'ArmR');
 
                 // Connect Joints (Constraints)
-                const connect = (bodyA, bodyB, offsetA, offsetB) => {
+                const connect = (bodyA, bodyB, offsetA, offsetB, type = 'joint') => {
                     let constraint = Constraint.create({
                         bodyA: bodyA,
                         pointA: offsetA,
@@ -367,22 +485,22 @@
                     });
                     Composite.add(this.world, constraint);
                     // Store for our custom motor PD controller
-                    this.joints.push({ parent: bodyA, child: bodyB });
+                    this.joints.push({ parent: bodyA, child: bodyB, type: type });
                 };
 
                 // Hips (Torso to Upper Legs)
-                connect(this.torso, this.legL.upper, {x:0, y:20}, {x:0, y:-12});
-                connect(this.torso, this.legR.upper, {x:0, y:20}, {x:0, y:-12});
+                connect(this.torso, this.legL.upper, {x:0, y:20}, {x:0, y:-12}, 'hip');
+                connect(this.torso, this.legR.upper, {x:0, y:20}, {x:0, y:-12}, 'hip');
                 // Knees (Upper to Lower Legs)
-                connect(this.legL.upper, this.legL.lower, {x:0, y:12}, {x:0, y:-12});
-                connect(this.legR.upper, this.legR.lower, {x:0, y:12}, {x:0, y:-12});
+                connect(this.legL.upper, this.legL.lower, {x:0, y:12}, {x:0, y:-12}, 'knee');
+                connect(this.legR.upper, this.legR.lower, {x:0, y:12}, {x:0, y:-12}, 'knee');
                 
                 // Shoulders (Torso to Upper Arms)
-                connect(this.torso, this.armL.upper, {x:0, y:-20}, {x:0, y:-10});
-                connect(this.torso, this.armR.upper, {x:0, y:-20}, {x:0, y:-10});
+                connect(this.torso, this.armL.upper, {x:0, y:-20}, {x:0, y:-10}, 'shoulder');
+                connect(this.torso, this.armR.upper, {x:0, y:-20}, {x:0, y:-10}, 'shoulder');
                 // Elbows (Upper to Lower Arms)
-                connect(this.armL.upper, this.armL.lower, {x:0, y:10}, {x:0, y:-10});
-                connect(this.armR.upper, this.armR.lower, {x:0, y:10}, {x:0, y:-10});
+                connect(this.armL.upper, this.armL.lower, {x:0, y:10}, {x:0, y:-10}, 'elbow');
+                connect(this.armR.upper, this.armR.lower, {x:0, y:10}, {x:0, y:-10}, 'elbow');
 
                 // Add all bodies to world
                 Composite.add(this.world, this.parts);
@@ -448,16 +566,24 @@
                 let outputs = this.brain.predict(inputs);
 
                 // 3. Act (Apply Motor Torques using PD Controller)
-                const maxTorque = 0.015; // Max torque muscle strength
-                const pGain = 0.008; // Proportional gain
-                const dGain = 0.001; // Derivative gain
+                const maxTorque = 0.08; // Increased max torque muscle strength
+                const pGain = 0.06; // Increased Proportional gain
+                const dGain = 0.01; // Increased Derivative gain
 
                 for (let i = 0; i < 8; i++) {
                     let joint = this.joints[i];
                     
+                    // Smooth the neural network output to prevent violent jittering
+                    this.smoothedOutputs[i] += (outputs[i] - this.smoothedOutputs[i]) * 0.15;
+
                     // Map output (-1 to 1) to target angle (-PI/2 to PI/2 approx)
-                    let targetAngle = outputs[i] * (Math.PI / 1.5); 
+                    let targetAngle = this.smoothedOutputs[i] * (Math.PI / 1.5); 
                     
+                    // Constrain Knees to human-like limits (prevent bending backwards)
+                    if (joint.type === 'knee') {
+                        targetAngle = Math.max(-0.1, Math.min(Math.PI / 1.2, targetAngle));
+                    }
+
                     let currentRelAngle = joint.child.angle - joint.parent.angle;
                     while(currentRelAngle > Math.PI) currentRelAngle -= Math.PI*2;
                     while(currentRelAngle < -Math.PI) currentRelAngle += Math.PI*2;
@@ -477,16 +603,20 @@
                 }
 
                 // 4. Check Death Conditions
-                // Died if torso touches ground (approx y threshold depending on terrain)
-                // Or if it falls too far behind (x < startX - 200)
                 let dist = this.torso.position.x - this.startX;
+                let tilt = Math.abs(this.torso.angle);
                 
-                // Basic ground death check (assuming ground is around y=600 for flat)
-                // Will refine dynamically based on map
-                if (this.torso.position.y > 570) {
-                    this.die();
-                } else if (dist < -300) {
-                    this.die(); // Too far backwards
+                // Grace period: allow bots to stabilize for the first 120 frames (2 seconds)
+                if (this.timeAlive > 120) {
+                    // STRICT STANDING: Die if tilted too much (crawling) or torso falls too low
+                    if (tilt > 1.3) { 
+                        this.die(); // Angle too extreme
+                    } else if (this.torso.position.y > this.legL.lower.position.y - 5 || 
+                               this.torso.position.y > this.legR.lower.position.y - 5) {
+                        this.die(); // Collapsed (Torso lower than legs)
+                    } else if (dist < -300) {
+                        this.die(); // Too far backwards
+                    }
                 }
             }
 
@@ -497,12 +627,12 @@
                 // Reward forward distance heavily
                 let fit = Math.max(0, dist); 
                 
-                // Bonus for staying alive
-                fit += this.timeAlive * 0.1;
+                // Huge bonus for staying alive to teach it how to stand before walking
+                fit += this.timeAlive * 2.0; 
                 
                 // Penalty for being tilted over
                 let tiltPenalty = Math.abs(this.torso.angle);
-                fit -= tiltPenalty * 10;
+                fit -= tiltPenalty * 30;
 
                 this.fitness = Math.max(0.1, fit); // Minimum fitness to avoid zero
                 return this.fitness;
@@ -531,6 +661,29 @@
         const engine = Engine.create();
         const world = engine.world;
         engine.gravity.y = 1; // Earth-like gravity
+
+        Events.on(engine, 'collisionStart', function(event) {
+            const pairs = event.pairs;
+            for (let i = 0; i < pairs.length; i++) {
+                const bodyA = pairs[i].bodyA;
+                const bodyB = pairs[i].bodyB;
+                
+                const isAEnv = bodyA.collisionFilter.category === CATEGORY_ENVIRONMENT;
+                const isBEnv = bodyB.collisionFilter.category === CATEGORY_ENVIRONMENT;
+                
+                if (isAEnv && bodyB.creature && !bodyB.creature.isDead) {
+                    // Only allow lower legs to touch the ground/environment
+                    if (bodyB.label !== 'LegLLower' && bodyB.label !== 'LegRLower') {
+                        bodyB.creature.die();
+                    }
+                } else if (isBEnv && bodyA.creature && !bodyA.creature.isDead) {
+                    // Only allow lower legs to touch the ground/environment
+                    if (bodyA.label !== 'LegLLower' && bodyA.label !== 'LegRLower') {
+                        bodyA.creature.die();
+                    }
+                }
+            }
+        });
 
         const render = Render.create({
             element: canvasContainer,
@@ -572,6 +725,107 @@
         let obstacles = [];
         let groundBodies = [];
 
+        // UI Panel Interaction Logic
+        let closedPanels = 0;
+        document.querySelectorAll('.panel').forEach(panel => {
+            const header = panel.querySelector('.panel-header');
+            const minBtn = panel.querySelector('.minimize-btn');
+            const closeBtn = panel.querySelector('.close-btn');
+            
+            // Dragging
+            let isDragging = false, startX, startY, initialX, initialY;
+            
+            header.addEventListener('mousedown', (e) => {
+                if(e.target.closest('.window-controls')) return;
+                isDragging = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                initialX = panel.offsetLeft;
+                initialY = panel.offsetTop;
+                panel.style.zIndex = 100; // Bring to front
+            });
+            
+            document.addEventListener('mousemove', (e) => {
+                if(!isDragging) return;
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                panel.style.left = `${initialX + dx}px`;
+                panel.style.top = `${initialY + dy}px`;
+                // Keep right property from interfering if dragged
+                panel.style.right = 'auto'; 
+            });
+            
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+                panel.style.zIndex = '';
+            });
+
+            // Minimize
+            minBtn.addEventListener('click', () => {
+                panel.classList.toggle('minimized');
+            });
+
+            // Close
+            closeBtn.addEventListener('click', () => {
+                panel.style.display = 'none';
+                closedPanels++;
+                document.getElementById('restore-ui-btn').style.display = 'flex';
+            });
+        });
+
+        document.getElementById('restore-ui-btn').addEventListener('click', () => {
+            document.querySelectorAll('.panel').forEach(p => p.style.display = 'flex');
+            closedPanels = 0;
+            document.getElementById('restore-ui-btn').style.display = 'none';
+        });
+
+
+        // Camera Panning Logic
+        let isCameraAuto = true;
+        let isCanvasDragging = false;
+        let lastMouseX = 0, lastMouseY = 0;
+        const recenterBtn = document.getElementById('recenter-camera-btn');
+
+        canvasContainer.addEventListener('mousedown', (e) => {
+            if(e.target.closest('.panel') || e.target.closest('button')) return;
+            isCanvasDragging = true;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+            document.body.style.cursor = 'grabbing';
+            
+            if (isCameraAuto) {
+                isCameraAuto = false;
+                recenterBtn.style.display = 'flex';
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isCanvasDragging) return;
+            
+            const dx = e.clientX - lastMouseX;
+            const dy = e.clientY - lastMouseY;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+
+            // Pan the camera by moving the bounds in the opposite direction
+            const bounds = render.bounds;
+            bounds.min.x -= dx;
+            bounds.max.x -= dx;
+            bounds.min.y -= dy;
+            bounds.max.y -= dy;
+        });
+
+        window.addEventListener('mouseup', () => {
+            isCanvasDragging = false;
+            document.body.style.cursor = 'default';
+        });
+        
+        recenterBtn.addEventListener('click', () => {
+            isCameraAuto = true;
+            recenterBtn.style.display = 'none';
+        });
+
+
         function initMap() {
             // Clear old map
             Composite.remove(world, obstacles);
@@ -581,7 +835,12 @@
 
             let mapType = mapSelect.value;
 
-            const groundOptions = { isStatic: true, render: { fillStyle: '#334155' }, friction: 1.0 };
+            const groundOptions = { 
+                isStatic: true, 
+                render: { fillStyle: '#334155' }, 
+                friction: 1.0,
+                collisionFilter: { category: CATEGORY_ENVIRONMENT }
+            };
 
             if (mapType === 'flat' || mapType === 'boxes') {
                 // Infinite-feeling flat ground (very wide)
@@ -594,7 +853,8 @@
                         let size = 30 + Math.random() * 30;
                         let box = Bodies.rectangle(i, 550 - size/2, size, size, { 
                             isStatic: true, 
-                            render: { fillStyle: '#f59e0b' } // Amber
+                            render: { fillStyle: '#f59e0b' }, // Amber
+                            collisionFilter: { category: CATEGORY_ENVIRONMENT }
                         });
                         obstacles.push(box);
                     }
@@ -706,6 +966,8 @@
                 return;
             }
 
+            if (!isCameraAuto) return; // Skip updating bounds if free panning
+
             // Smoothly move camera to best creature
             let width = render.options.width;
             let height = render.options.height;
@@ -728,27 +990,39 @@
             }
         }
 
-        // Main Loop
-        function gameLoop() {
-            // Allow multiple simulation steps per visual frame based on speed
-            for (let s = 0; s < simSpeed; s++) {
-                // Update Physics manually instead of using Runner to control speed strictly
-                Engine.update(engine, 1000 / 60); 
+        // --- BACKGROUND WORKER FOR PHYSICS LOOP ---
+        // Decoupled from requestAnimationFrame so it runs in background tabs
+        const workerCode = `
+            let intervalId = null;
+            self.onmessage = function(e) {
+                if (e.data === 'start') {
+                    intervalId = setInterval(() => self.postMessage('tick'), 1000 / 60);
+                }
+            };
+        `;
+        const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerTimer = new Worker(URL.createObjectURL(workerBlob));
 
-                // Update Creatures
-                let mode = modeSelect.value;
-                for (let p of population) {
-                    p.update(obstacles, mode);
+        workerTimer.onmessage = function(e) {
+            if (e.data === 'tick') {
+                // Allow multiple simulation steps per frame based on speed
+                for (let s = 0; s < simSpeed; s++) {
+                    // Update Physics manually
+                    Engine.update(engine, 1000 / 60); 
+
+                    // Update Creatures
+                    let mode = modeSelect.value;
+                    for (let p of population) {
+                        p.update(obstacles, mode);
+                    }
+
+                    frameCount++;
+                    if(frameCount >= GENERATION_TIME) break; // Don't over-simulate if time is up
                 }
 
-                frameCount++;
-                if(frameCount >= GENERATION_TIME) break; // Don't over-simulate if time is up
+                updateCamera();
             }
-
-            updateCamera();
-            
-            requestAnimationFrame(gameLoop);
-        }
+        };
 
         // Events
         window.addEventListener('resize', () => {
@@ -785,7 +1059,7 @@
         // Initialize
         initMap();
         spawnPopulation();
-        gameLoop();
+        workerTimer.postMessage('start');
 
     </script>
 </body>
