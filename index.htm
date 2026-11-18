@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Evolution: Bipedal Runner & Jumper</title>
+    <title>train</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Matter.js Physics Engine -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
@@ -1035,6 +1035,10 @@
         speedSlider.addEventListener('input', (e) => {
             simSpeed = parseInt(e.target.value);
             speedVal.innerText = simSpeed + 'x';
+        });
+
+        popSlider.addEventListener('input', (e) => {
+            popVal.innerText = e.target.value;
         });
 
         mapSelect.addEventListener('change', () => {
